@@ -26,7 +26,7 @@ vec2 uv_from_position_ndc(vec3 position_ndc) {
 }
 
 const uint MAX_STEPS_BSEARCH = 32;
-const float DEPTH_THRESHOLD_VS = 0.05;
+const float DEPTH_THRESHOLD_VS = 0.01;
 vec2 uv_binary_search(vec3 hit_position_vs, vec3 step_vs, out float depth_difference_vs) {
     vec2 hit_uv;
     for (uint i = 0; i < MAX_STEPS_BSEARCH; ++i) {
@@ -86,6 +86,7 @@ void main() {
     float depth_ndc = ndr.z;
     if (depth_ndc > 0.999) {
         out_fragment_color = scene_color;
+        return;
     }
 
     vec3 position_vs = position_vs_from_depth_ndc(in_uv, depth_ndc);
@@ -99,6 +100,7 @@ void main() {
         out_fragment_color = scene_color;
         return;
     }
+    
     vec4 hit_color = texture(scene_colour_texture, hit_uv);
     vec3 hit_luminance = luminance_from(hit_color.rgb);
     vec3 scene_luminance = luminance_from(scene_color.rgb);
@@ -113,6 +115,5 @@ void main() {
         hit_color,
         luminance_factor * depth_difference_factor
     );
-    // out_fragment_color = vec4(float(steps) / float(MAX_STEPS_RAYMARCH), 0.0, 0.0, 1.0);
-    // out_fragment_color = vec4(depth_difference_factor, 0.0, 0.0, 1.0);
+    // out_fragment_color = vec4(hit_uv, 0.0, 1.0);
 }
