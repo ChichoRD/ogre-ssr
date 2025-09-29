@@ -82,46 +82,10 @@ vec3 luminance_from(vec3 color) {
 void main() {
     vec4 scene_color = texture(scene_colour_texture, in_texcoord);
     vec4 ndr = texture(normal_depth_rough_texture, in_texcoord);
-
     vec3 normal_vs = normalize(vec3(ndr.xy, sqrt(1.0 - dot(ndr.xy, ndr.xy))));
     float depth_cs = ndr.z;
-    // if (depth_cs > 0.9999) {
-    //     out_fragment_color = scene_color;
-    //     return;
-    // }
+    float depth_vs = ndr.w;
+    float dbg_comb = dot(scene_color, ndr);
 
-    // float roughness = ndr.w;
-    vec3 luminance = luminance_from(scene_color.rgb);
-    float roughness = dot(luminance, luminance);
-
-    vec3 position_vs = position_vs_from_depth_cs(in_texcoord, depth_cs);
-    vec3 view_direction_vs = normalize(position_vs);
-    vec3 reflect_direction_vs = normalize(reflect(view_direction_vs, normal_vs));
-
-    uint steps;
-    float depth_difference_vs;
-    vec2 it_texcoord = texcoord_raytrace(position_vs, reflect_direction_vs, depth_difference_vs, steps);
-    vec4 it_color = texture(scene_colour_texture, it_texcoord);
-    out_fragment_color = mix(it_color, scene_color, 1.0 - smoothstep(0.0, DEPTH_THRESHOLD_VS, (depth_difference_vs)));
-    // out_fragment_color = vec4(it_texcoord, 0.0, 1.0);
-    // out_fragment_color = vec4(smoothstep(DEPTH_THRESHOLD_VS, 0.0, depth_difference_vs));
-    // out_fragment_color = vec4(float(steps) / float(MAX_RAYTRACE_STEPS));
-    // out_fragment_color = vec4(reflect_direction_vs.xyz, 1.0);
-    // out_fragment_color = vec4(depth_cs);
-    // out_fragment_color = ndr;
-    out_fragment_color = vec4(normal_vs, 1.0);
-    
-    // Debug output
-    // vec3 positon_cs = position_cs_from(position_vs);
-    // vec2 test_texcoord = texcoord_from_position_cs(positon_cs);
-    // out_fragment_color =
-    //     (scene_color) * 0.0001
-    //     + vec4(normal_vs, 1.0) * 0.0001
-    //     + vec4(depth_cs * step(0.5, in_texcoord.x)) * 0.0001
-    //     + vec4(ndr.a * step(0.5, 1.0 - in_texcoord.x)) * 1.0001
-    //     + vec4(in_texcoord, 0.0, 1.0) * 0.0001
-    //     + vec4(roughness, roughness, roughness, 1.0) * 0.0001
-    //     + vec4(position_vs, 1.0) * 0.0001
-    //     + vec4(test_texcoord, 0.0, 1.0) * 0.0001
-    //     + vec4(position_vs.z - position_vs_from_depth_cs(vec2(0.0), depth_cs).z) * 0.0001;
+    out_fragment_color = vec4(in_texcoord, 0.0, dbg_comb);
 }
