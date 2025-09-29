@@ -109,6 +109,7 @@ void main() {
     // out_fragment_color = vec4(reflect_direction_vs.xyz, 1.0);
     // out_fragment_color = vec4(depth_cs);
     // out_fragment_color = ndr;
+    out_fragment_color = vec4(normal_vs, 1.0);
     
     // Debug output
     // vec3 positon_cs = position_cs_from(position_vs);

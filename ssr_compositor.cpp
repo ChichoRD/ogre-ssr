@@ -26,7 +26,6 @@ static const std::string scheme_ndr_name = "ssr_output_normal_depth_rough_scheme
 
 static auto ssr_compositor_init_textures(
     Ogre::TextureManager &texture_manager,
-    Ogre::MaterialManager &material_manager,
     Ogre::Viewport &viewport
 ) {
     Ogre::TexturePtr normal_depth_rough = texture_manager.createManual(
@@ -61,22 +60,6 @@ static auto ssr_compositor_init_textures(
         Ogre::PF_R8G8B8,
         Ogre::TU_RENDERTARGET | Ogre::TU_STATIC_WRITE_ONLY
     );
-
-    material_manager.getByName(material_ndr_name)
-        ->getTechnique(0)
-        ->setSchemeName(scheme_ndr_name);
-
-    material_manager.getByName(material_raytrace_name)
-        ->getTechnique(0)
-        ->getPass(0)
-        ->getTextureUnitState(0)
-        ->setTextureName(rt_in_scene_name);
-    material_manager.getByName(material_raytrace_name)
-        ->getTechnique(0)
-        ->getPass(0)
-        ->getTextureUnitState(1)
-        ->setTextureName(rt_out_ndr_name);
-
     return std::array{normal_depth_rough, scene, temp};
 }
 
@@ -218,42 +201,14 @@ Ogre::Technique *ssr_compositor::handleSchemeNotFound(
     *pass = *material->getTechnique(0)->getPass(0);
 
     return &technique_ndr;
-
-
-    // (void)schemeIndex;
-    // Ogre::MaterialManager& matMgr = Ogre::MaterialManager::getSingleton();
-    // Ogre::String curSchemeName = matMgr.getActiveScheme();
-    // matMgr.setActiveScheme(Ogre::MSN_DEFAULT);
-    // Ogre::Technique* originalTechnique = originalMaterial->getBestTechnique(lodIndex, rend);
-    // matMgr.setActiveScheme(curSchemeName);
-
-    // Ogre::RTShader::ShaderGenerator& rtShaderGen = Ogre::RTShader::ShaderGenerator::getSingleton();
-    // rtShaderGen.createShaderBasedTechnique(originalTechnique, scheme_ndr_name);
-
-    // for (unsigned short i=0; i<originalTechnique->getNumPasses(); i++)
-    // {
-    //     rtShaderGen.validateMaterial(scheme_ndr_name, *originalMaterial);
-    //     // Grab the generated technique.
-    //     for(Ogre::Technique* curTech : originalMaterial->getTechniques())
-    //     {
-    //         if (curTech->getSchemeName() == schemeName)
-    //         {
-    //             return curTech;
-    //         }
-    //     }
-    // }
-    
-    // return NULL;
 }
 
-void ssr_compositor::init(Ogre::CompositorManager &composer, Ogre::Viewport &viewport)
-{
+void ssr_compositor::init(Ogre::CompositorManager &composer, Ogre::Viewport &viewport) {
     Ogre::MaterialManager::getSingleton().addListener(this, scheme_ndr_name);
     composer.registerCompositorLogic(ssr.name, &ssr);
 
     const auto [ndr, scene, temp] = ssr_compositor_init_textures(
         Ogre::TextureManager::getSingleton(),
-        Ogre::MaterialManager::getSingleton(),
         viewport
     );
     normal_depth_rough = ndr;
@@ -267,6 +222,7 @@ void ssr_compositor::init(Ogre::CompositorManager &composer, Ogre::Viewport &vie
     disable_pipelines(composer, viewport);
 }
 void ssr_compositor::deinit(Ogre::CompositorManager &composer, Ogre::TextureManager &texture_manager) {
+    Ogre::MaterialManager::getSingleton().removeListener(this, scheme_ndr_name);
     composer.unregisterCompositorLogic(ssr.name);
     texture_manager.remove(normal_depth_rough->getName(), texture_group_name);
     texture_manager.remove(scene->getName(), texture_group_name);
