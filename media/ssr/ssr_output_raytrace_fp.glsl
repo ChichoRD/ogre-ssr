@@ -29,29 +29,27 @@ vec2 uv_from_position_ndc(vec3 position_ndc) {
 
 const uint MAX_STEPS_BSEARCH = 32;
 const float DEPTH_THRESHOLD_VS = 0.005;
-vec2 uv_binary_search(vec3 hit_position_vs, vec3 step_vs, out float depth_difference_vs) {
+vec2 uv_binary_search(vec3 hit_position_vs, vec3 step_vs, out float hit_sampled_depth_vs, out float depth_difference_vs) {
     vec2 hit_uv;
     for (uint i = 0; i < MAX_STEPS_BSEARCH; ++i) {
         step_vs *= 0.5;
-        hit_position_vs += step_vs * -sign(depth_difference_vs);
         hit_uv = uv_from_position_ndc(position_ndc_from_vs(hit_position_vs));
 
-        float sampled_depth_vs = position_vs_from_depth_ndc(
+        hit_sampled_depth_vs = position_vs_from_depth_ndc(
             hit_uv.xy,
             texture(normal_depth_rough_texture, hit_uv).w
         ).z;
-        depth_difference_vs = sampled_depth_vs - hit_position_vs.z;
-        if (abs(depth_difference_vs) < DEPTH_THRESHOLD_VS) {
-            return hit_uv;
-        }
+        depth_difference_vs = hit_position_vs.z - hit_sampled_depth_vs;
+        hit_position_vs += step_vs * sign(depth_difference_vs);
     }
     return hit_uv;
 }
 
+// source: https://andrewphamdotblog.wordpress.com/2019/07/31/screen-space-reflections/
 const float MAX_DISTANCE_VS = 100.0;
-const uint MAX_STEPS_RAYMARCH = 100;
+const uint MAX_STEPS_RAYMARCH = 10;
 const float STEP_SIZE_VS = 0.05;
-vec2 uv_raymarch(vec3 origin_vs, vec3 direction_vs, out float depth_difference_vs, out uint steps) {
+vec2 uv_raymarch(vec3 origin_vs, vec3 direction_vs, out float hit_sampled_depth_vs, out float depth_difference_vs, out uint steps) {
     vec3 step_vs = direction_vs * STEP_SIZE_VS;
     vec3 hit_position_vs = origin_vs;
     vec2 hit_uv;
@@ -59,17 +57,15 @@ vec2 uv_raymarch(vec3 origin_vs, vec3 direction_vs, out float depth_difference_v
     for (; steps < MAX_STEPS_RAYMARCH; ++steps) {
         hit_position_vs += step_vs;
         hit_uv = uv_from_position_ndc(position_ndc_from_vs(hit_position_vs));
-        float sampled_depth_vs = position_vs_from_depth_ndc(
+        hit_sampled_depth_vs = position_vs_from_depth_ndc(
             hit_uv.xy,
             texture(normal_depth_rough_texture, hit_uv).w
         ).z;
 
-        depth_difference_vs = sampled_depth_vs - hit_position_vs.z;
-        if (sampled_depth_vs - 1.0 > -far_clip_plane) {
-            if (abs(depth_difference_vs) < DEPTH_THRESHOLD_VS) {
-                return hit_uv;
-            } else if (depth_difference_vs > 0.0) {
-                // return uv_binary_search(hit_position_vs, step_vs, depth_difference_vs);
+        depth_difference_vs = hit_position_vs.z - hit_sampled_depth_vs;
+        if (step_vs.z - depth_difference_vs < 1.0) {
+            if (depth_difference_vs < 0.0) {
+                return uv_binary_search(hit_position_vs, step_vs, hit_sampled_depth_vs, depth_difference_vs);
             }
         }
     }
@@ -95,33 +91,34 @@ void main() {
     vec3 view_direction_vs = normalize(position_vs);
     vec3 reflection_direction_vs = normalize(reflect(view_direction_vs, normal_vs));
 
+    float hit_sampled_depth_vs;
     float depth_difference_vs;
     uint steps;
-    vec2 hit_uv = uv_raymarch(position_vs, reflection_direction_vs, depth_difference_vs, steps);
+    vec2 hit_uv = uv_raymarch(position_vs, reflection_direction_vs, hit_sampled_depth_vs, depth_difference_vs, steps);
     if (steps == MAX_STEPS_RAYMARCH) {
         out_fragment_color = scene_color;
         return;
     }
     
     vec4 hit_color = texture(scene_colour_texture, hit_uv);
-    vec3 hit_luminance = luminance_from(hit_color.rgb);
-    vec3 scene_luminance = luminance_from(scene_color.rgb);
+    vec3 hit_luminance = luminance_from_rgb(hit_color.rgb);
+    vec3 scene_luminance = luminance_from_rgb(scene_color.rgb);
     float luminance_factor = clamp(
         dot(hit_luminance, hit_luminance) / (dot(scene_luminance, scene_luminance) + 0.001),
         0.0,
         1.0
     );
-    float depth_difference_factor = smoothstep(0.0, DEPTH_THRESHOLD_VS, abs(depth_difference_vs));
+    float depth_difference_factor =  1.0 - smoothstep(0.0, DEPTH_THRESHOLD_VS, abs(depth_difference_vs));
     out_fragment_color = mix(
         scene_color,
         hit_color,
-        1.0
+        luminance_factor
     );
-    // out_fragment_color = vec4(normal_vs, 1.0);
-    // out_fragment_color = vec4(hit_uv, 0.0, 1.0);
-    // out_fragment_color = hit_color;
-
-    // vec4 test_color = texture(scene_colour_texture, uv_from_position_ndc(position_ndc_from_vs(position_vs + reflection_direction_vs * 0.1)));
-    // out_fragment_color = test_color;
-    // out_fragment_color = vec4(uv_from_position_ndc(position_ndc_from_vs(vec3(1.0, -1.0, -5.0))), 0.0, 1.0);
+    out_fragment_color =
+        position_ndc_from_vs(vec3(0.0, 0.0, hit_sampled_depth_vs)).zzzz * step(0.5, 1.0 - in_uv.x)
+        + vec4(depth_ndc * step(0.5, in_uv.x)); 
+    out_fragment_color = vec4(-depth_ndc + position_ndc_from_vs(vec3(0.0, 0.0, hit_sampled_depth_vs)).z);
+    out_fragment_color = vec4(hit_uv, 0.0, 1.0);
+    out_fragment_color = vec4(hit_uv - in_uv, 0.0, 1.0);
+    out_fragment_color = vec4(float(steps) / float(MAX_STEPS_RAYMARCH));
 }
