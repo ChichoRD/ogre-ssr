@@ -69,6 +69,7 @@ material ssr/output_raytrace {
                 param_named_auto i_projection_matrix inverse_projection_matrix
                 param_named_auto projection_matrix projection_matrix
                 param_named_auto far_clip_plane far_clip_distance
+                param_named_auto texel_size texel_offsets
 
                 param_named scene_colour_texture int 0
                 param_named normal_depth_rough_texture int 1
