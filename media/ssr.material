@@ -1,0 +1,87 @@
+vertex_program ssr/output_normal_depth_rough_vp glsl {
+    source ssr_output_normal_depth_rough_vp.glsl
+    entry_point main
+    syntax glsl410
+
+    // default_params {
+    //     param_named_auto world_view_matrix worldview_matrix
+    //     param_named_auto it_world_view_matrix inverse_transpose_worldview_matrix
+    //     param_named_auto projection_matrix projection_matrix
+    //     param_named_auto specular surface_specular_colour
+    // }
+}
+
+fragment_program ssr/output_normal_depth_rough_fp glsl {
+    source ssr_output_normal_depth_rough_fp.glsl
+    entry_point main
+    syntax glsl410
+}
+
+material ssr/output_normal_depth_rough {
+    technique {
+        scheme ssr_output_normal_depth_rough_scheme
+        pass {
+            depth_write on
+			depth_check on
+            
+            vertex_program_ref ssr/output_normal_depth_rough_vp {
+                param_named_auto world_view_matrix worldview_matrix
+                param_named_auto it_world_view_matrix inverse_transpose_worldview_matrix
+                param_named_auto projection_matrix projection_matrix
+                // param_named_auto specular surface_specular_colour
+            }
+            fragment_program_ref ssr/output_normal_depth_rough_fp {
+
+            }
+        }
+    }
+}
+
+vertex_program ssr/output_raytrace_vp glsl {
+    source ssr_output_raytrace_vp.glsl
+    entry_point main
+    syntax glsl410
+
+    // default_params {
+    //     param_named_auto world_view_projection_matrix worldviewprojection_matrix
+    // }
+}
+
+fragment_program ssr/output_raytrace_fp glsl {
+    source ssr_output_raytrace_fp.glsl
+    entry_point main
+    syntax glsl410
+
+    // default_params {
+    //     param_named scene_colour_texture int 0
+    //     param_named normal_depth_rough_texture int 1
+    // }
+}
+
+material ssr/output_raytrace {
+    technique {
+        pass {
+            // vertex_program_ref Ogre/Compositor/StdQuad_vp {
+            vertex_program_ref ssr/output_raytrace_vp {
+                
+            }
+            fragment_program_ref ssr/output_raytrace_fp {
+                param_named_auto i_projection_matrix inverse_projection_matrix
+                param_named_auto projection_matrix projection_matrix
+                param_named_auto far_clip_plane far_clip_distance
+
+                param_named scene_colour_texture int 0
+                param_named normal_depth_rough_texture int 1
+            }
+
+            texture_unit scene_colour {
+                // tex_coord_set 0
+                filtering none
+            }
+            texture_unit normal_depth_rough {
+                // tex_coord_set 1
+                filtering none
+            }
+        }
+    }
+}
