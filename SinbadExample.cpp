@@ -136,8 +136,8 @@ void SinbadExample::setupScene(void) {
         "plane", 
         Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME,
         Ogre::Plane(Ogre::Vector3::UNIT_Y, 0), 
-        1500, 1500, 20, 20, true,
-        1, 5, 5, Ogre::Vector3::UNIT_Z
+        15, 15, 4, 4, true,
+        1, 4, 4, Ogre::Vector3::UNIT_Z
     );
     Ogre::Entity *planeEnt = mSM->createEntity("Plane", "plane");
     Ogre::SceneNode *planeNode = mSM->getRootSceneNode()->createChildSceneNode("nPlane");

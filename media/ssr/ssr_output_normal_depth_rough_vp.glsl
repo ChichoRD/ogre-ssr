@@ -24,7 +24,7 @@ layout(location = 4) in vec4 specular;
 // attribute vec3 normal;
 
 layout(location = 0) out vec3 out_normal_vs;
-layout(location = 1) out float out_depth_cs;
+layout(location = 1) out float out_depth_ndc;
 layout(location = 2) out float out_roughness;
 layout(location = 3) out vec4 out_position_vs; // Debug
 
@@ -36,11 +36,11 @@ void main() {
     // position_os.y *= -1.0; // Debug
 
     vec4 pos_vs = world_view_matrix * vec4(position_os.xyz, 1.0);
-    vec4 pos_cs = projection_matrix * vec4(pos_vs.xyz, 1.0);
-    gl_Position = pos_cs;
+    vec4 pos_ndc = projection_matrix * vec4(pos_vs.xyz, 1.0);
+    gl_Position = pos_ndc;
 
     out_normal_vs = normalize((it_world_view_matrix * vec4(in_normal_os, 0.0)).xyz);
-    out_depth_cs = pos_cs.z / pos_cs.w;
+    out_depth_ndc = pos_ndc.z / pos_ndc.w;
     out_roughness = sqrt(dot(specular.rgb, specular.rgb));
     out_position_vs = pos_vs;
 }
