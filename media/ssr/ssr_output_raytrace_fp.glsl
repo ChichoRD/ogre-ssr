@@ -1,6 +1,7 @@
 #version 410
 
 uniform sampler2D scene_colour_texture;
+// TODO: change rough name
 uniform sampler2D normal_depth_rough_texture;
 uniform mat4 i_projection_matrix;
 uniform mat4 projection_matrix;
@@ -10,6 +11,31 @@ uniform vec4 texel_size;
 
 layout(location = 0) in vec2 in_uv;
 layout(location = 0) out vec4 out_fragment_color;
+
+
+const float DISTANCE_MAX_VS = 100.0;
+const float THICKNESS_THRESHOLD_VS = 0.1;
+const float THICKNESS_RADIUS_VS = 0.1;
+const uint STEPS_MAX = 32;
+
+struct normal_depth_sample {
+    vec3 normal_vs;
+    float depth_ndc;
+};
+normal_depth_sample normal_depth_from_sampler(vec2 uv) {
+    vec4 nd = texture(normal_depth_rough_texture, uv);
+    vec3 normal_vs = normalize(vec3(nd.xy, sqrt(1.0 - dot(nd.xy, nd.xy))));
+    float depth_ndc = nd.z;
+    normal_depth_sample result;
+    result.normal_vs = normal_vs;
+    result.depth_ndc = depth_ndc;
+    return result;
+}
+
+// source: https://zznewclear13.github.io/posts/screen-space-reflection-en/
+bool ray_hit(float depth_difference_vs, float sample_depth_vs, float thickness_radius_vs, float thickness_threshold_vs) {
+    return ((depth_difference_vs - thickness_radius_vs) / sample_depth_vs) < thickness_threshold_vs;
+}
 
 vec3 position_vs_from_depth_ndc(vec2 uv, float depth_ndc) {
     vec2 xy_ndc = uv * 2.0 - vec2(1.0);
@@ -60,12 +86,14 @@ vec2 uv_raymarch(vec3 origin_vs, vec3 direction_vs, vec3 origin_normal_vs, out f
         hit_uv = uv_from_position_ndc(position_ndc_from_vs(hit_position_vs));
         hit_sampled_depth_vs = position_vs_from_depth_ndc(
             hit_uv.xy,
-            texture(normal_depth_rough_texture, hit_uv).w
+            texture(normal_depth_rough_texture, hit_uv).z
         ).z;
 
         depth_difference_vs = hit_position_vs.z - hit_sampled_depth_vs;
             if (depth_difference_vs < 0.0) {
-                vec3 normal_vs = normalize(texture(normal_depth_rough_texture, hit_uv).xyz);
+                vec3 normal_vs;
+                normal_depth_sample nd = normal_depth_from_sampler(hit_uv);
+                normal_vs = nd.normal_vs;
                 if (dot(normal_vs, origin_normal_vs) < 0.95) {
                     return uv_binary_search(hit_position_vs, step_vs, hit_sampled_depth_vs, depth_difference_vs);
                 }
@@ -83,8 +111,11 @@ void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
     vec4 ndr = texture(normal_depth_rough_texture, in_uv);
 
-    vec3 normal_vs = normalize(ndr.xyz);
-    float depth_ndc = ndr.w;
+    vec3 normal_vs;
+    float depth_ndc;
+    normal_depth_sample nd = normal_depth_from_sampler(in_uv);
+    normal_vs = nd.normal_vs;
+    depth_ndc = nd.depth_ndc;
     if (depth_ndc > 0.999) {
         out_fragment_color = scene_color;
         return;
@@ -115,14 +146,6 @@ void main() {
     out_fragment_color = mix(
         scene_color,
         hit_color,
-        luminance_factor * depth_difference_factor
+        1.0
     );
-    // out_fragment_color =
-    //     position_ndc_from_vs(vec3(0.0, 0.0, hit_sampled_depth_vs)).zzzz * step(0.5, 1.0 - in_uv.x)
-    //     + vec4(depth_ndc * step(0.5, in_uv.x)); 
-    // out_fragment_color = vec4(-depth_ndc + position_ndc_from_vs(vec3(0.0, 0.0, hit_sampled_depth_vs)).z);
-    out_fragment_color = vec4(hit_uv, 0.0, 1.0);
-    // out_fragment_color = texture(scene_colour_texture, uv_from_position_ndc(position_ndc_from_vs()));
-    // out_fragment_color = vec4(hit_uv - in_uv, 0.0, 1.0);
-    // out_fragment_color = vec4(float(steps) / float(MAX_STEPS_RAYMARCH));
 }

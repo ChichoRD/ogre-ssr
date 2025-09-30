@@ -25,8 +25,6 @@ layout(location = 4) in vec4 specular;
 
 layout(location = 0) out vec3 out_normal_vs;
 layout(location = 1) out float out_depth_ndc;
-// layout(location = 2) out float out_roughness;
-// layout(location = 3) out vec4 out_position_vs; // Debug
 
 void main() {
     // vec4 in_position_os = vertex;
@@ -41,6 +39,4 @@ void main() {
 
     out_normal_vs = normalize((it_world_view_matrix * vec4(in_normal_os, 0.0)).xyz);
     out_depth_ndc = pos_ndc.z / pos_ndc.w;
-    // out_roughness = sqrt(dot(specular.rgb, specular.rgb));
-    // out_position_vs = pos_vs;
 }
