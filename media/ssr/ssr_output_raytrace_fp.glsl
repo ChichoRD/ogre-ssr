@@ -14,7 +14,9 @@ layout(location = 0) out vec4 out_fragment_color;
 
 
 const float DISTANCE_MAX_VS = 100.0;
-const float THICKNESS_THRESHOLD_VS = 0.1;
+// FIXME: figure out what this represents
+// [0.0, 1.0]
+const float THICKNESS_THRESHOLD_VS = 0.01;
 const float THICKNESS_RADIUS_VS = 0.05;
 const uint STEPS_MAX = 32;
 
@@ -62,8 +64,17 @@ float depth_vs_from_ndc01(float depth_ndc01) {
 
 
 // source: https://zznewclear13.github.io/posts/screen-space-reflection-en/
-bool ray_thick_hit(float depth_difference_vs, float sample_depth_vs, float thickness_radius_vs, float thickness_threshold_vs) {
-    return abs((depth_difference_vs - thickness_radius_vs) / sample_depth_vs) < thickness_threshold_vs;
+bool ray_thick_hit(float ray_depth_vs, float sample_depth_vs, float thickness_radius_vs, float thickness_threshold_vs) {
+    // negative if ray is further back than sample. depth in view space has range [0.0, -far]
+    // say ray is at -15.0 and sample at -10.0, then -15.0 - (-10.0) = -5.0
+    bool behind = (ray_depth_vs < sample_depth_vs);
+    float sample_depth_end_vs = sample_depth_vs * thickness_threshold_vs + thickness_radius_vs;
+    bool inside_depth_end = ray_depth_vs < sample_depth_end_vs * sample_depth_vs;
+
+    // o - - - - - - s - ( - - r - - ) - - - -
+    //               | - - - - >
+    // o - - - - >
+    return behind && ((ray_depth_vs - sample_depth_vs - thickness_radius_vs) / sample_depth_vs) > thickness_threshold_vs;
 }
 
 vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
@@ -81,6 +92,8 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
     float w = 0.0;
     float dw = 1.0 / float(STEPS_MAX);
 
+    vec2 sample_uv;
+    float sample_depth_ndc01;
     for (uint i = 0; i < STEPS_MAX; ++i) {
         w += dw;
 
@@ -89,26 +102,25 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
         vec2 p = mix(p0, p1, w);
 
         float ray_depth_ndc = q.z * k;
-        vec2 sample_uv = position_uv_from_ndc(vec3(p, ray_depth_ndc)).xy;
+        sample_uv = position_uv_from_ndc(vec3(p, ray_depth_ndc)).xy;
         normal_depth_sample nd = normal_depth_from_sampler(sample_uv);
-        float sample_depth_ndc01 = nd.depth_ndc01;
+        sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
 
         float sample_depth_vs = position_vs_from_ndc(vec3(p, sample_depth_ndc)).z;
         float ray_depth_vs = position_vs_from_ndc(vec3(p, ray_depth_ndc)).z;
 
-        // negative if ray is further back than sample. depth in view space has range [0.0, -far]
-        // say ray is at -15.0 and sample at -10.0, then -15.0 - (-10.0) = -5.0
-        float depth_difference_vs = ray_depth_vs - sample_depth_vs;
-        if (
-            depth_difference_vs < 0.0
-            // && ray_thick_hit(depth_difference_vs, sample_depth_vs, THICKNESS_RADIUS_VS, THICKNESS_THRESHOLD_VS)
-        ) {
+        // float sample_depth_vs = depth_vs_from_ndc01(sample_depth_ndc01);
+        // float ray_depth_vs = depth_vs_from_ndc01(ray_depth_ndc * 0.5 + 0.5);
+
+        // float depth_difference_vs = ray_depth_vs - sample_depth_vs;
+        if (ray_thick_hit(ray_depth_vs, sample_depth_vs, THICKNESS_RADIUS_VS, THICKNESS_THRESHOLD_VS)) {
+        // if (ray_depth_vs < sample_depth_vs) {
             return vec4(sample_uv, sample_depth_ndc01, 1.0);
         }
     }
 
-    return vec4(0.0);
+    return vec4(sample_uv, sample_depth_ndc01, 0.0);
 }
 
 
@@ -151,6 +163,11 @@ vec4 test_coordinates(vec3 uv) {
     return vec4(border + tests);
 }
 
+    // TODO
+    // if (dot(reflection_direction_vs, vec3(0.0, 0.0, 1.0)) > 0.0) {
+    //     out_fragment_color = scene_color;
+    //     return;
+    // }
 
 void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
@@ -168,14 +185,22 @@ void main() {
     vec3 position_vs = position_vs_from_ndc(position_ndc);
     vec3 view_direction_vs = normalize(position_vs);
     vec3 reflection_direction_vs = normalize(reflect(view_direction_vs, normal_vs));
-
-    vec4 hit_uv = intersection_raymarch_uv(position_vs, reflection_direction_vs, DISTANCE_MAX_VS);
-    if (hit_uv.w == 0.0) {
+    if (dot(reflection_direction_vs, vec3(0.0, 0.0, 1.0)) > 0.0) {
         out_fragment_color = scene_color;
         return;
     }
-    
+    out_fragment_color = vec4(step(0.8, reflection_direction_vs.y));
+
+    vec4 hit_uv = intersection_raymarch_uv(position_vs, reflection_direction_vs, DISTANCE_MAX_VS);
     vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
+    if (in_uv.x > 0.5) {
+        return;
+    }
+    if (hit_uv.w == 0.0) {
+        out_fragment_color = hit_uv.z > 0.99999 ? hit_color : scene_color;
+        return;
+    }
+    
     vec3 hit_luminance = luminance_from_rgb(hit_color.rgb);
     vec3 scene_luminance = luminance_from_rgb(scene_color.rgb);
     float luminance_factor = clamp(
