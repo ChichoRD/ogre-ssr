@@ -92,16 +92,19 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
         vec2 sample_uv = position_uv_from_ndc(vec3(p, ray_depth_ndc)).xy;
         normal_depth_sample nd = normal_depth_from_sampler(sample_uv);
         float sample_depth_ndc01 = nd.depth_ndc01;
+        float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
 
-        float sample_depth_vs = depth_vs_from_ndc01(sample_depth_ndc01);
-        float ray_depth_vs = depth_vs_from_ndc01(ray_depth_ndc * 0.5 + 0.5);
+        float sample_depth_vs = position_vs_from_ndc(vec3(p, sample_depth_ndc)).z;
+        float ray_depth_vs = position_vs_from_ndc(vec3(p, ray_depth_ndc)).z;
 
+        // negative if ray is further back than sample. depth in view space has range [0.0, -far]
+        // say ray is at -15.0 and sample at -10.0, then -15.0 - (-10.0) = -5.0
         float depth_difference_vs = ray_depth_vs - sample_depth_vs;
         if (
-            depth_difference_vs > 0.0
-            && ray_thick_hit(depth_difference_vs, sample_depth_vs, THICKNESS_RADIUS_VS, THICKNESS_THRESHOLD_VS)
+            depth_difference_vs < 0.0
+            // && ray_thick_hit(depth_difference_vs, sample_depth_vs, THICKNESS_RADIUS_VS, THICKNESS_THRESHOLD_VS)
         ) {
-            return vec4(sample_uv, sample_depth_ndc01, ray_depth_vs);
+            return vec4(sample_uv, sample_depth_ndc01, 1.0);
         }
     }
 
@@ -114,6 +117,41 @@ vec3 luminance_from_rgb(vec3 color) {
 }
 
 
+vec4 test_coordinates(vec3 uv) {
+    const float BORDER_SIZE = 0.01;
+    vec2 quadrant_uv = (uv.xy - vec2(0.5)) * 2.0;
+    vec2 border_xy = step(abs(quadrant_uv), vec2(BORDER_SIZE));
+    float border = max(border_xy.x, border_xy.y) * 0.5;
+
+    vec3 position_ndc = position_ndc_from_uv(uv);
+    vec3 position_vs = position_vs_from_ndc(position_ndc);
+
+    vec4 position_cs_reprojected = position_cs_from_vs(position_vs);
+    vec3 position_ndc_reprojected = position_ndc_from_cs(position_cs_reprojected);
+    vec3 uv_reprojected = position_uv_from_ndc(position_ndc_reprojected);
+    float depth_reprojected_vs = depth_vs_from_ndc01(uv_reprojected.z);
+    vec3 position_vs_reprojected = position_vs_from_ndc(position_ndc_reprojected);
+
+    const float EPSILON = 0.0001;
+    float uv_eq = step(dot(uv - uv_reprojected, uv - uv_reprojected), EPSILON);
+    float ndc_eq = step(dot(position_ndc - position_ndc_reprojected, position_ndc - position_ndc_reprojected), EPSILON);
+    float depth_eq = step(abs(depth_reprojected_vs - position_vs.z), EPSILON);
+    float vs_eq = step(dot(position_vs - position_vs_reprojected, position_vs - position_vs_reprojected), EPSILON);
+
+    float top_left =        step(quadrant_uv.x, -BORDER_SIZE)   * step(quadrant_uv.y, -BORDER_SIZE);
+    float top_right =       step(BORDER_SIZE, quadrant_uv.x)    * step(quadrant_uv.y, -BORDER_SIZE);
+    float bottom_left =     step(quadrant_uv.x, -BORDER_SIZE)   * step(BORDER_SIZE, quadrant_uv.y);
+    float bottom_right =    step(BORDER_SIZE, quadrant_uv.x)    * step(BORDER_SIZE, quadrant_uv.y);
+
+    float tests = 0.0; 
+    tests += uv_eq * top_left;
+    tests += ndc_eq * top_right;
+    tests += depth_eq * bottom_left;
+    tests += vs_eq * bottom_right;
+    return vec4(border + tests);
+}
+
+
 void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
     vec3 normal_vs;
@@ -121,7 +159,7 @@ void main() {
     normal_depth_sample nd = normal_depth_from_sampler(in_uv);
     normal_vs = nd.normal_vs;
     depth_ndc01 = nd.depth_ndc01;
-    if (depth_ndc01 > 0.999) {
+    if (depth_ndc01 > 0.99999) {
         out_fragment_color = scene_color;
         return;
     }
@@ -130,10 +168,10 @@ void main() {
     vec3 position_vs = position_vs_from_ndc(position_ndc);
     vec3 view_direction_vs = normalize(position_vs);
     vec3 reflection_direction_vs = normalize(reflect(view_direction_vs, normal_vs));
-    
+
     vec4 hit_uv = intersection_raymarch_uv(position_vs, reflection_direction_vs, DISTANCE_MAX_VS);
     if (hit_uv.w == 0.0) {
-        out_fragment_color = vec4(0.0);
+        out_fragment_color = scene_color;
         return;
     }
     
@@ -151,5 +189,4 @@ void main() {
         hit_color,
         1.0
     );
-    out_fragment_color = vec4(hit_uv.w / (-100.0));
 }
