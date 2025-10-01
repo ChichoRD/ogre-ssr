@@ -35,6 +35,7 @@ struct ssr_instance : public Ogre::CompositorInstance::Listener {
             fparams->setNamedConstant("step_size", step_size);
             fparams->setNamedConstant("vignette_radius", vignette_radius);
             fparams->setNamedConstant("vignette_feather", vignette_feather);
+            // fparams->setNamedConstant("i_projection_matrix", Ogre::);
             break;
         }
         }

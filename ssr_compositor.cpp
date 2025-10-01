@@ -63,9 +63,11 @@ static auto ssr_compositor_init_textures(
     return std::array{normal_depth_rough, scene, temp};
 }
 
-static auto ssr_compositor_create_pipelines(ssr_compositor &self, Ogre::CompositorManager &composer) {
+static auto ssr_compositor_create_pipelines(ssr_compositor &self, Ogre::CompositorManager &composer, Ogre::Viewport &viewport) {
+    (void)self;
     Ogre::CompositorPtr compositor = composer.create(
-        self.ssr.name,
+        //self.ssr.name,
+        "ssr",
         Ogre::ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME
     ); {
         Ogre::CompositionTechnique *pipeline = compositor->createTechnique(); {
@@ -99,7 +101,7 @@ static auto ssr_compositor_create_pipelines(ssr_compositor &self, Ogre::Composit
                 pass_clear.setInputMode(Ogre::CompositionTargetPass::IM_NONE);
                 pass_clear.setOutputName(rt_out_ndr_name); {
                     Ogre::CompositionPass *pass = pass_clear.createPass(Ogre::CompositionPass::PT_CLEAR);
-                    pass->setClearColour(Ogre::ColourValue(0,0,1,1));
+                    pass->setClearColour(Ogre::ColourValue(0, 0, 1, 0));
                     pass->setClearDepth(1.0f);
                     pass->setClearBuffers(Ogre::FBT_COLOUR | Ogre::FBT_DEPTH);
                 }
@@ -125,6 +127,17 @@ static auto ssr_compositor_create_pipelines(ssr_compositor &self, Ogre::Composit
                     pass->setMaterialName(material_raytrace_name);
                     pass->setInput(0, rt_in_scene_name);
                     pass->setInput(1, rt_out_ndr_name);
+
+                    auto fparams = pass->getMaterial()->getTechnique(0)->getPass(0)->getFragmentProgramParameters();
+                    const auto &projection_matrix = viewport.getCamera()->getProjectionMatrix();
+                    fparams->setNamedConstant(
+                        "raytrace_projection_matrix",
+                        projection_matrix
+                    );
+                    fparams->setNamedConstant(
+                        "raytrace_i_projection_matrix",
+                        projection_matrix.inverse()
+                    );
                 }
             }
             // copyback
@@ -205,7 +218,7 @@ Ogre::Technique *ssr_compositor::handleSchemeNotFound(
 
 void ssr_compositor::init(Ogre::CompositorManager &composer, Ogre::Viewport &viewport) {
     Ogre::MaterialManager::getSingleton().addListener(this, scheme_ndr_name);
-    composer.registerCompositorLogic(ssr.name, &ssr);
+    // composer.registerCompositorLogic("ssr", &ssr);
 
     const auto [ndr, scene, temp] = ssr_compositor_init_textures(
         Ogre::TextureManager::getSingleton(),
@@ -215,15 +228,17 @@ void ssr_compositor::init(Ogre::CompositorManager &composer, Ogre::Viewport &vie
     this->scene = scene;
     this->temp = temp;
 
-    const auto [compositor] = ssr_compositor_create_pipelines(*this, composer);
+    const auto [compositor] = ssr_compositor_create_pipelines(*this, composer, viewport);
+    // compositor->addListener(ssr)
     pipelines[0] = compositor;
 
     ssr_compositor_register_pipelines(pipelines, composer, viewport);
     disable_pipelines(composer, viewport);
 }
 void ssr_compositor::deinit(Ogre::CompositorManager &composer, Ogre::TextureManager &texture_manager) {
+    (void)composer;
     Ogre::MaterialManager::getSingleton().removeListener(this, scheme_ndr_name);
-    composer.unregisterCompositorLogic(ssr.name);
+    // composer.unregisterCompositorLogic(ssr.name);
     texture_manager.remove(normal_depth_rough->getName(), texture_group_name);
     texture_manager.remove(scene->getName(), texture_group_name);
     texture_manager.remove(temp->getName(), texture_group_name);

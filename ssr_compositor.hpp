@@ -5,7 +5,7 @@
 struct ssr_compositor : public Ogre::MaterialManager::Listener {
     static constexpr size_t pipelines_count = 1;
     
-    ssr_logic ssr{};
+    // ssr_logic ssr{};
     
     Ogre::TexturePtr normal_depth_rough{};
     Ogre::TexturePtr scene{};
