@@ -70,9 +70,11 @@ material ssr/output_raytrace {
             fragment_program_ref ssr/output_raytrace_fp {
                 // param_named raytrace_i_projection_matrix mat4x4 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0
                 // param_named raytrace_projection_matrix mat4x4 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0
-                // param_named_auto far_clip_plane far_clip_distance
-                // param_named_auto near_clip_plane near_clip_distance
                 // param_named_auto texel_size texel_offsets
+
+                param_named_auto near_clip_plane near_clip_distance
+                param_named_auto far_clip_plane far_clip_distance
+                param_named_auto fov_y fov
 
                 param_named scene_colour_texture int 0
                 param_named normal_depth_rough_texture int 1

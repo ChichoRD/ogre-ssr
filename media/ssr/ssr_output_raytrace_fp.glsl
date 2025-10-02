@@ -6,12 +6,15 @@ uniform sampler2D normal_depth_rough_texture;
 uniform mat4 raytrace_i_projection_matrix;
 uniform mat4 raytrace_projection_matrix;
 
+uniform float near_clip_plane;
+uniform float far_clip_plane;
+
 layout(location = 0) in vec2 in_uv;
 layout(location = 0) out vec4 out_fragment_color;
 
 
 const float DISTANCE_MAX_VS = 64.0;
-const float THICKNESS_RADIUS_VS = 2.0;
+const float THICKNESS_RADIUS_VS = 2.5;
 const uint STEPS_MAX = 32;
 
 struct normal_depth_sample {
@@ -94,8 +97,48 @@ float raypath_depth_ndc(raypath rp) {
     return rp.cs_xyz1.z * rp.cs_rcp_w1;
 } 
 
+// source: https://zznewclear13.github.io/posts/screen-space-reflection-en/#frustum-clipping
+vec3 segment_end_clip_vs_from(vec3 origin_vs, vec3 end_vs, vec2 near_far_clip_distances, vec2 near_plane_half_size) {
+    const float INFINITY = 1.0 / 0.0;
+    origin_vs.z *= -1.0;
+    end_vs.z *= -1.0;
+
+    vec3 dir = end_vs - origin_vs;
+    vec3 signDir = sign(dir);
+
+    float nfSlab = signDir.z * (near_far_clip_distances.y - near_far_clip_distances.x) * 0.5f + (near_far_clip_distances.y + near_far_clip_distances.x) * 0.5f;
+    float lenZ = (nfSlab - origin_vs.z) / dir.z;
+    if (dir.z == 0.0f) lenZ = INFINITY;
+
+    vec2 ss = sign(dir.xy - near_plane_half_size * dir.z) * near_plane_half_size;
+    vec2 denom = ss * dir.z - dir.xy;
+    vec2 lenXY = (origin_vs.xy - ss * origin_vs.z) / denom;
+    if (lenXY.x < 0.0f || denom.x == 0.0f) lenXY.x = INFINITY;
+    if (lenXY.y < 0.0f || denom.y == 0.0f) lenXY.y = INFINITY;
+
+    float len = min(min(1.0f, lenZ), min(lenXY.x, lenXY.y));
+    vec3 clippedVS = origin_vs + dir * len;
+
+    clippedVS.z *= -1.0;
+    return clippedVS;
+}
+
+vec3 segment_end_clip_vs(vec3 origin_vs, vec3 end_vs) {
+    return segment_end_clip_vs_from(
+        origin_vs,
+        end_vs,
+        vec2(near_clip_plane, far_clip_plane),
+        vec2(1.0, 1.0) / vec2(raytrace_projection_matrix[0][0], raytrace_projection_matrix[1][1])
+    );
+}
+
+
 vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
+    const bool FRUSTUM_CLIP = false;
     vec3 end_vs = origin_vs + direction_vs * max_distance_vs;
+    if (FRUSTUM_CLIP) {
+        end_vs = segment_end_clip_vs(origin_vs, end_vs);
+    }
     vec4 origin_cs = position_cs_from_vs(origin_vs);
     vec4 end_cs = position_cs_from_vs(end_vs);
 
@@ -176,11 +219,6 @@ vec4 test_coordinates(vec3 uv) {
     return vec4(border + tests);
 }
 
-    // TODO
-    // if (dot(reflection_direction_vs, vec3(0.0, 0.0, 1.0)) > 0.0) {
-    //     out_fragment_color = scene_color;
-    //     return;
-    // }
 
 void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
@@ -207,10 +245,6 @@ void main() {
     vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
     if (hit_uv.w == 0.0) {
         out_fragment_color = hit_uv.z > 0.99999 ? hit_color : scene_color;
-        // out_fragment_color = scene_color;
-        if (in_uv.x < 0.5) {
-            out_fragment_color = vec4(hit_uv.xy, 0.0, 1.0);
-        }
         return;
     }
     
@@ -227,7 +261,4 @@ void main() {
         hit_color,
         1.0
     );
-    if (in_uv.x < 0.5) {
-        out_fragment_color = vec4(hit_uv.xy, 1.0, 1.0);
-    }
 }
