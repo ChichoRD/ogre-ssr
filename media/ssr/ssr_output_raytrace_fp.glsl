@@ -14,7 +14,7 @@ layout(location = 0) out vec4 out_fragment_color;
 
 const float INFINITY = 1.0 / 0.0;
 const float DISTANCE_MAX_VS = 64.0;
-const float THICKNESS_RADIUS_VS = 2.5;
+const float THICKNESS_RADIUS_VS = 0.5;
 const uint STEPS_MAX = 32;
 const uint STEPS_BSEARCH_MAX = 8;
 
@@ -228,10 +228,12 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
         previous_depth_difference_ndc = depth_difference_ndc;
     }
 
+    vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 0.0);
     if (BSEARCH && potential_w > 0.0) {
-        return intersection_binary_search_uv(rp, rp_front, potential_w, potential_w - dw);
+        vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, potential_w, potential_w - dw);
+        return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
     } else {
-        return vec4(sample_uv, sample_depth_ndc01, 0.0);
+        return hit_uv;
     }
 }
 
