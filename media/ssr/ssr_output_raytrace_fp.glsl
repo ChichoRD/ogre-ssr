@@ -14,12 +14,17 @@ layout(location = 0) out vec4 out_fragment_color;
 
 
 const float INFINITY = 1.0 / 0.0;
+const float EPSILON = 0.0001;
+const float FAR_MAX_NDC = 1.0 - EPSILON;
+
 const float DISTANCE_MAX_VS = 64.0;
 const float THICKNESS_RADIUS_VS = 0.005;
 const float THICKNESS_RADIUS_BMINIMIZATION_VS = THICKNESS_RADIUS_VS * 100.0;
 
 const float FRESNEL_POWER = 1.2;
-const float LUMINANCE_POWER = 1.2; 
+const float LUMINANCE_POWER = 1.2;
+const float FRONT_RAY_DISCARD_POWER = 16.0;
+const float REFLECTION_POWER_BIAS = 8.0;
 
 const uint STEPS_MAX = 32;
 const uint STEPS_BSEARCH_MAX = 8;
@@ -273,7 +278,6 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
             } else if (
                 previous_depth_difference_ndc < 0.0
                 && depth_difference_ndc < min_depth_difference_ndc
-                && w < 0.9999
             ) {
                 min_depth_difference_ndc = depth_difference_ndc;
                 potential_w = w;
@@ -308,7 +312,6 @@ vec4 test_coordinates(vec3 uv) {
     float depth_reprojected_vs = depth_vs_from_ndc01(uv_reprojected.z);
     vec3 position_vs_reprojected = position_vs_from_ndc(position_ndc_reprojected);
 
-    const float EPSILON = 0.0001;
     float uv_eq = step(dot(uv - uv_reprojected, uv - uv_reprojected), EPSILON);
     float ndc_eq = step(dot(position_ndc - position_ndc_reprojected, position_ndc - position_ndc_reprojected), EPSILON);
     float depth_eq = step(abs(depth_reprojected_vs - position_vs.z), EPSILON);
@@ -340,7 +343,7 @@ void main() {
     normal_depth_sample nd = normal_depth_from_sampler(in_uv);
     normal_vs = nd.normal_vs;
     depth_ndc01 = nd.depth_ndc01;
-    if (depth_ndc01 > 0.99999) {
+    if (depth_ndc01 > FAR_MAX_NDC) {
         out_fragment_color = scene_color;
         return;
     }
@@ -349,29 +352,27 @@ void main() {
     vec3 position_vs = position_vs_from_ndc(position_ndc);
     vec3 view_direction_vs = normalize(position_vs);
     vec3 reflection_direction_vs = normalize(reflect(view_direction_vs, normal_vs));
-    if (dot(reflection_direction_vs, vec3(0.0, 0.0, 1.0)) > 0.0) {
-        out_fragment_color = scene_color;
-        return;
-    }
 
     vec4 hit_uv = intersection_raymarch_uv(position_vs, reflection_direction_vs, DISTANCE_MAX_VS);
     vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
 
-    float fresnel_factor = pow(1.0 - max(dot(view_direction_vs, normal_vs), 0.0), FRESNEL_POWER);
+    float fresnel_factor = pow(1.0 - max(dot(-view_direction_vs, normal_vs), 0.0), FRESNEL_POWER);
 
     float hit_luminance = luminance_from_rgb(hit_color.rgb);
     float scene_luminance = luminance_from_rgb(scene_color.rgb);
     float luminance_factor = pow(hit_luminance / (scene_luminance + 1.0), LUMINANCE_POWER);
 
+    float front_ray_factor = pow(1.0 - max(dot(reflection_direction_vs, vec3(0.0, 0.0, 1.0)), 0.0), FRONT_RAY_DISCARD_POWER);
+
     vec4 reflection_color = mix(
         scene_color,
         hit_color,
-        fresnel_factor * luminance_factor
+        front_ray_factor * pow(fresnel_factor * luminance_factor, 1.0 / REFLECTION_POWER_BIAS)
     );
 
     if (hit_uv.w == 0.0) {
-        out_fragment_color = hit_uv.z > 0.99999 ? reflection_color : scene_color;
-        return;
+        out_fragment_color = hit_uv.z > FAR_MAX_NDC ? reflection_color : scene_color;
+    } else {
+        out_fragment_color = reflection_color;
     }
-    out_fragment_color = reflection_color;
 }
