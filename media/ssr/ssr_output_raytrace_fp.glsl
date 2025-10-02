@@ -14,7 +14,7 @@ layout(location = 0) out vec4 out_fragment_color;
 
 const float INFINITY = 1.0 / 0.0;
 const float DISTANCE_MAX_VS = 64.0;
-const float THICKNESS_RADIUS_VS = 0.5;
+const float THICKNESS_RADIUS_VS = 2.5;
 const uint STEPS_MAX = 32;
 const uint STEPS_BSEARCH_MAX = 8;
 
@@ -166,6 +166,41 @@ vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float 
     return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
 }
 
+vec4 intersection_binary_minization_uv(raypath rp, float min_depth_difference_ndc, float w, float prev_w) {
+    vec2 hit_sample_uv = vec2(0.0);
+    float hit_sample_depth_ndc01 = 0.0;
+    float hit = 0.0;
+    for (uint i = 0; i < STEPS_BSEARCH_MAX; ++i) {
+        float mid_w = (w + prev_w) * 0.5;
+
+        raypath rpl = raypath_lerp(rp, mid_w);
+
+        float ray_depth_ndc = raypath_depth_ndc(rpl);
+
+        vec2 sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
+        normal_depth_sample nd = normal_depth_from_sampler(sample_uv);
+        float sample_depth_ndc01 = nd.depth_ndc01;
+        float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
+        float depth_difference_ndc = ray_depth_ndc - sample_depth_ndc;
+
+        if (
+            depth_difference_ndc >= 0.0
+            && abs(depth_difference_ndc) < min_depth_difference_ndc
+            && dot(normalize(rpl.cs_xyz1), nd.normal_vs) < 0.0
+        ) {
+            w = mid_w;
+            hit_sample_uv = sample_uv;
+            hit_sample_depth_ndc01 = sample_depth_ndc01;
+            hit = 1.0;
+            min_depth_difference_ndc = depth_difference_ndc;
+        } else {
+            prev_w = mid_w;
+        }
+    }
+    return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
+}
+
+
 vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
     const bool FRUSTUM_CLIP = true;
     const bool BSEARCH = true;
@@ -230,7 +265,7 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
 
     vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 0.0);
     if (BSEARCH && potential_w > 0.0) {
-        vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, potential_w, potential_w - dw);
+        vec4 bsearch_hit_uv = intersection_binary_minization_uv(rp, min_depth_difference_ndc, potential_w, potential_w - dw);
         return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
     } else {
         return hit_uv;
