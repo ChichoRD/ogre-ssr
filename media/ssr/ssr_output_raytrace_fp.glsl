@@ -12,12 +12,18 @@ uniform float far_clip_plane;
 layout(location = 0) in vec2 in_uv;
 layout(location = 0) out vec4 out_fragment_color;
 
+
 const float INFINITY = 1.0 / 0.0;
 const float DISTANCE_MAX_VS = 64.0;
 const float THICKNESS_RADIUS_VS = 0.005;
 const float THICKNESS_RADIUS_BMINIMIZATION_VS = THICKNESS_RADIUS_VS * 100.0;
+
+const float FRESNEL_POWER = 1.2;
+const float LUMINANCE_POWER = 1.2; 
+
 const uint STEPS_MAX = 32;
 const uint STEPS_BSEARCH_MAX = 8;
+
 
 struct normal_depth_sample {
     vec3 normal_vs;
@@ -62,6 +68,7 @@ float depth_vs_from_ndc01(float depth_ndc01) {
     return -z_vs;
 }
 
+
 struct raypath {
     vec3 cs_xyz0;
     vec3 cs_xyz1;
@@ -99,6 +106,7 @@ float raypath_depth_ndc(raypath rp) {
     return rp.cs_xyz1.z * rp.cs_rcp_w1;
 } 
 
+
 // source: https://zznewclear13.github.io/posts/screen-space-reflection-en/#frustum-clipping
 vec3 segment_end_clip_vs_from(vec3 origin_vs, vec3 end_vs, vec2 near_far_clip_distances, vec2 near_plane_half_size) {
     origin_vs.z *= -1.0;
@@ -123,7 +131,6 @@ vec3 segment_end_clip_vs_from(vec3 origin_vs, vec3 end_vs, vec2 near_far_clip_di
     clippedVS.z *= -1.0;
     return clippedVS;
 }
-
 vec3 segment_end_clip_vs(vec3 origin_vs, vec3 end_vs) {
     return segment_end_clip_vs_from(
         origin_vs,
@@ -132,6 +139,7 @@ vec3 segment_end_clip_vs(vec3 origin_vs, vec3 end_vs) {
         vec2(1.0, 1.0) / vec2(raytrace_projection_matrix[0][0], raytrace_projection_matrix[1][1])
     );
 }
+
 
 vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float prev_w) {
     vec2 hit_sample_uv = vec2(0.0);
@@ -211,7 +219,6 @@ vec4 intersection_binary_minimization_uv(raypath rp, vec3 origin_vs, vec3 end_vs
     return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
 }
 
-
 vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
     const bool FRUSTUM_CLIP = true;
     const bool BSEARCH = true;
@@ -286,11 +293,6 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
 }
 
 
-vec3 luminance_from_rgb(vec3 color) {
-    return vec3(dot(color, vec3(0.2126, 0.7152, 0.0722)));
-}
-
-
 vec4 test_coordinates(vec3 uv) {
     const float BORDER_SIZE = 0.01;
     vec2 quadrant_uv = (uv.xy - vec2(0.5)) * 2.0;
@@ -326,6 +328,11 @@ vec4 test_coordinates(vec3 uv) {
 }
 
 
+float luminance_from_rgb(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+
 void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
     vec3 normal_vs;
@@ -349,28 +356,22 @@ void main() {
 
     vec4 hit_uv = intersection_raymarch_uv(position_vs, reflection_direction_vs, DISTANCE_MAX_VS);
     vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
-    if (hit_uv.w == 0.0) {
-        out_fragment_color = hit_uv.z > 0.99999 ? hit_color : scene_color;
-        if (in_uv.x < 0.5) {
-            out_fragment_color = vec4(hit_uv.xy, 0.0, 1.0);
-        }
-        return;
-    }
-    
-    vec3 hit_luminance = luminance_from_rgb(hit_color.rgb);
-    vec3 scene_luminance = luminance_from_rgb(scene_color.rgb);
-    float luminance_factor = clamp(
-        dot(hit_luminance, hit_luminance) / (dot(scene_luminance, scene_luminance) + 0.001),
-        0.0,
-        1.0
-    );
-    // float depth_difference_factor =  1.0 - smoothstep(0.0, DEPTH_THRESHOLD_VS, abs(depth_difference_vs));
-    out_fragment_color = mix(
+
+    float fresnel_factor = pow(1.0 - max(dot(view_direction_vs, normal_vs), 0.0), FRESNEL_POWER);
+
+    float hit_luminance = luminance_from_rgb(hit_color.rgb);
+    float scene_luminance = luminance_from_rgb(scene_color.rgb);
+    float luminance_factor = pow(hit_luminance / (scene_luminance + 1.0), LUMINANCE_POWER);
+
+    vec4 reflection_color = mix(
         scene_color,
         hit_color,
-        1.0
+        fresnel_factor * luminance_factor
     );
-    if (in_uv.x < 0.5) {
-        out_fragment_color = vec4(hit_uv.xy, 1.0, 1.0);
+
+    if (hit_uv.w == 0.0) {
+        out_fragment_color = hit_uv.z > 0.99999 ? reflection_color : scene_color;
+        return;
     }
+    out_fragment_color = reflection_color;
 }
