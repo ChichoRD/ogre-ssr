@@ -166,13 +166,15 @@ vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float 
 
         if (
             ray_depth_ndc >= sample_depth_ndc
-            && ray_front_depth_ndc <= sample_depth_ndc
+            // && ray_front_depth_ndc <= sample_depth_ndc
             // && dot(normalize(rpl.cs_xyz1), nd.normal_vs) < 0.0
         ) {
             w = mid_w;
-            hit_sample_uv = sample_uv;
-            hit_sample_depth_ndc01 = sample_depth_ndc01;
-            hit = 1.0;
+            if (ray_front_depth_ndc <= sample_depth_ndc) {
+                hit_sample_uv = sample_uv;
+                hit_sample_depth_ndc01 = sample_depth_ndc01;
+                hit = 1.0;
+            }
         } else {
             prev_w = mid_w;
         }
