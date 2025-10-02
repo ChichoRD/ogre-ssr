@@ -80,10 +80,12 @@ material ssr/output_raytrace {
 
             texture_unit scene_colour {
                 // tex_coord_set 0
+                tex_address_mode clamp
                 filtering none
             }
             texture_unit normal_depth_rough {
                 // tex_coord_set 1
+                tex_address_mode clamp
                 filtering none
             }
         }

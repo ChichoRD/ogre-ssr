@@ -6,15 +6,12 @@ uniform sampler2D normal_depth_rough_texture;
 uniform mat4 raytrace_i_projection_matrix;
 uniform mat4 raytrace_projection_matrix;
 
-// uniform float far_clip_plane;
-// uniform float near_clip_plane;
-
 layout(location = 0) in vec2 in_uv;
 layout(location = 0) out vec4 out_fragment_color;
 
 
 const float DISTANCE_MAX_VS = 64.0;
-const float THICKNESS_RADIUS_VS = 0.1;
+const float THICKNESS_RADIUS_VS = 2.0;
 const uint STEPS_MAX = 32;
 
 struct normal_depth_sample {
@@ -51,6 +48,7 @@ vec3 position_vs_from_ndc(vec3 position_ndc) {
 }
 
 // source: https://stackoverflow.com/a/46118945
+// BUG: precission issues compared to full inv matrix multiplication
 float depth_vs_from_ndc01(float depth_ndc01) {
     float A     = raytrace_projection_matrix[2][2];
     float B     = raytrace_projection_matrix[3][2];
@@ -126,7 +124,11 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
         sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
 
-        if (ray_depth_ndc >= sample_depth_ndc && ray_front_depth_ndc <= sample_depth_ndc) {
+        if (
+            ray_depth_ndc >= sample_depth_ndc
+            && ray_front_depth_ndc <= sample_depth_ndc
+            && dot(direction_vs, nd.normal_vs) < 0.0
+        ) {
             return vec4(sample_uv, sample_depth_ndc01, 1.0);
         }
     }
@@ -205,6 +207,10 @@ void main() {
     vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
     if (hit_uv.w == 0.0) {
         out_fragment_color = hit_uv.z > 0.99999 ? hit_color : scene_color;
+        // out_fragment_color = scene_color;
+        if (in_uv.x < 0.5) {
+            out_fragment_color = vec4(hit_uv.xy, 0.0, 1.0);
+        }
         return;
     }
     
@@ -221,4 +227,7 @@ void main() {
         hit_color,
         1.0
     );
+    if (in_uv.x < 0.5) {
+        out_fragment_color = vec4(hit_uv.xy, 1.0, 1.0);
+    }
 }
