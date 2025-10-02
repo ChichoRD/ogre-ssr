@@ -174,6 +174,9 @@ vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float 
                 hit_sample_uv = sample_uv;
                 hit_sample_depth_ndc01 = sample_depth_ndc01;
                 hit = 1.0;
+            } else {
+                // TODO: check if optimistic advance is better
+                w = (w + prev_w) * 0.5;
             }
         } else {
             prev_w = mid_w;
@@ -218,6 +221,8 @@ vec4 intersection_binary_minimization_uv(raypath rp, vec3 origin_vs, vec3 end_vs
                 hit_sample_uv = sample_uv;
                 hit = 1.0;
                 min_depth_difference_ndc = depth_difference_ndc;
+            } else {
+                w = (w + prev_w) * 0.5;
             }
         } else {
             prev_w = mid_w;
