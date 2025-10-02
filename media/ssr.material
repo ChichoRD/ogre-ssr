@@ -28,7 +28,8 @@ material ssr/output_normal_depth_rough {
                 param_named_auto world_view_matrix worldview_matrix
                 param_named_auto it_world_view_matrix inverse_transpose_worldview_matrix
                 param_named_auto projection_matrix projection_matrix
-                // param_named_auto specular surface_specular_colour
+                param_named_auto specular surface_specular_colour
+                param_named_auto shininess surface_shininess
 
                 // param_named_auto far_clip_plane far_clip_distance
                 // param_named_auto near_clip_plane near_clip_distance
@@ -74,7 +75,6 @@ material ssr/output_raytrace {
 
                 param_named_auto near_clip_plane near_clip_distance
                 param_named_auto far_clip_plane far_clip_distance
-                param_named_auto fov_y fov
 
                 param_named scene_colour_texture int 0
                 param_named normal_depth_rough_texture int 1

@@ -1,7 +1,6 @@
 #version 410
 
 uniform sampler2D scene_colour_texture;
-// TODO: change rough name
 uniform sampler2D normal_depth_rough_texture;
 uniform mat4 raytrace_i_projection_matrix;
 uniform mat4 raytrace_projection_matrix;
@@ -21,6 +20,7 @@ const float DISTANCE_MAX_VS = 64.0;
 const float THICKNESS_RADIUS_VS = 0.005;
 const float THICKNESS_RADIUS_BMINIMIZATION_VS = THICKNESS_RADIUS_VS * 100.0;
 
+const float ROUGHNESS_POWER = 1.2;
 const float FRESNEL_POWER = 1.2;
 const float LUMINANCE_POWER = 1.2;
 const float FRONT_RAY_DISCARD_POWER = 16.0;
@@ -30,17 +30,20 @@ const uint STEPS_MAX = 32;
 const uint STEPS_BSEARCH_MAX = 8;
 
 
-struct normal_depth_sample {
+struct normal_depth_rough_sample {
     vec3 normal_vs;
     float depth_ndc01;
+    float roughness;
 };
-normal_depth_sample normal_depth_from_sampler(vec2 uv) {
+normal_depth_rough_sample normal_depth_rough_from_sampler(vec2 uv) {
     vec4 nd = texture(normal_depth_rough_texture, uv);
     vec3 normal_vs = normalize(vec3(nd.xy, sqrt(1.0 - dot(nd.xy, nd.xy))));
     float depth_ndc01 = nd.z;
-    normal_depth_sample result;
+    float roughness = nd.w;
+    normal_depth_rough_sample result;
     result.normal_vs = normal_vs;
     result.depth_ndc01 = depth_ndc01;
+    result.roughness = roughness;
     return result;
 }
 
@@ -160,7 +163,7 @@ vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float 
         float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
 
         vec2 sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
-        normal_depth_sample nd = normal_depth_from_sampler(sample_uv);
+        normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
         float sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
 
@@ -175,7 +178,6 @@ vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float 
                 hit_sample_depth_ndc01 = sample_depth_ndc01;
                 hit = 1.0;
             } else {
-                // TODO: check if optimistic advance is better
                 w = (w + prev_w) * 0.5;
             }
         } else {
@@ -205,7 +207,7 @@ vec4 intersection_binary_minimization_uv(raypath rp, vec3 origin_vs, vec3 end_vs
         float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
 
         vec2 sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
-        normal_depth_sample nd = normal_depth_from_sampler(sample_uv);
+        normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
         float sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
         float depth_difference_ndc = ray_depth_ndc - sample_depth_ndc;
@@ -265,7 +267,7 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
         float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
 
         sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
-        normal_depth_sample nd = normal_depth_from_sampler(sample_uv);
+        normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
         sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
         float depth_difference_ndc = ray_depth_ndc - sample_depth_ndc;
@@ -347,9 +349,9 @@ void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
     vec3 normal_vs;
     float depth_ndc01;
-    normal_depth_sample nd = normal_depth_from_sampler(in_uv);
-    normal_vs = nd.normal_vs;
-    depth_ndc01 = nd.depth_ndc01;
+    normal_depth_rough_sample ndr = normal_depth_rough_from_sampler(in_uv);
+    normal_vs = ndr.normal_vs;
+    depth_ndc01 = ndr.depth_ndc01;
     if (depth_ndc01 > FAR_MAX_NDC) {
         out_fragment_color = scene_color;
         return;
@@ -370,11 +372,11 @@ void main() {
     float luminance_factor = pow(hit_luminance / (scene_luminance + 1.0), LUMINANCE_POWER);
 
     float front_ray_factor = pow(1.0 - max(dot(reflection_direction_vs, vec3(0.0, 0.0, 1.0)), 0.0), FRONT_RAY_DISCARD_POWER);
-
+    float roughness_factor = pow(1.0 - ndr.roughness, ROUGHNESS_POWER);
     vec4 reflection_color = mix(
         scene_color,
         hit_color,
-        front_ray_factor * pow(fresnel_factor * luminance_factor, 1.0 / REFLECTION_POWER_BIAS)
+        front_ray_factor * pow(fresnel_factor * luminance_factor * roughness_factor, 1.0 / REFLECTION_POWER_BIAS)
     );
 
     if (hit_uv.w == 0.0) {

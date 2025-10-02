@@ -212,6 +212,9 @@ Ogre::Technique *ssr_compositor::handleSchemeNotFound(
     technique_ndr.setSchemeName(schemeName);
     Ogre::Pass* pass = technique_ndr.createPass();
     *pass = *material->getTechnique(0)->getPass(0);
+    
+    pass->setSpecular(originalMaterial->getTechnique(0)->getPass(0)->getSpecular());
+    pass->setShininess(originalMaterial->getTechnique(0)->getPass(0)->getShininess());
 
     return &technique_ndr;
 }

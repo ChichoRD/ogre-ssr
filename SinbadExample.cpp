@@ -145,10 +145,26 @@ void SinbadExample::setupScene(void) {
     planeNode->setPosition(0, -5, 0);
 
 
-    // unit cube to measure
+    // unit cube to measure, spoiler it is not unit
     Ogre::Entity *cube = mSM->createEntity("Cube", "cube.mesh");
+    cube->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(1.0, 1.0, 1.0, 1.0);
+    cube->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(32.0f);
     Ogre::SceneNode *cubeNode = mSM->getRootSceneNode()->createChildSceneNode("nCube");
     cubeNode->attachObject(cube);
-    cubeNode->setPosition(-5, -4.5, 0);
-    cubeNode->setScale(0.01, 0.01, 0.01);
+    cubeNode->setPosition(+5, -4.25, 0);
+    cubeNode->setScale(0.02, 0.02, 0.02);
+
+    // back plane and side plane
+    Ogre::Entity *backplane = mSM->createEntity("BigPlane", "plane");
+    Ogre::SceneNode *backplane_node = mSM->getRootSceneNode()->createChildSceneNode("nBigPlane");
+    backplane_node->attachObject(backplane);
+    backplane_node->setPosition(0, 2.5, -7.5);
+    backplane_node->pitch(Ogre::Degree(90));
+
+    Ogre::Entity *sideplane = mSM->createEntity("SidePlane", "plane");
+    Ogre::SceneNode *sideplane_node = mSM->getRootSceneNode()->createChildSceneNode("nSidePlane");
+    sideplane_node->attachObject(sideplane);
+    sideplane_node->setPosition(-7.5, 2.5, 0);
+    sideplane_node->yaw(Ogre::Degree(90));
+    sideplane_node->pitch(Ogre::Degree(90));
 }
