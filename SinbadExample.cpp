@@ -143,4 +143,12 @@ void SinbadExample::setupScene(void) {
     Ogre::SceneNode *planeNode = mSM->getRootSceneNode()->createChildSceneNode("nPlane");
     planeNode->attachObject(planeEnt);
     planeNode->setPosition(0, -5, 0);
+
+
+    // unit cube to measure
+    Ogre::Entity *cube = mSM->createEntity("Cube", "cube.mesh");
+    Ogre::SceneNode *cubeNode = mSM->getRootSceneNode()->createChildSceneNode("nCube");
+    cubeNode->attachObject(cube);
+    cubeNode->setPosition(-5, -4.5, 0);
+    cubeNode->setScale(0.01, 0.01, 0.01);
 }
