@@ -12,7 +12,7 @@ uniform float far_clip_plane;
 layout(location = 0) in vec2 in_uv;
 layout(location = 0) out vec4 out_fragment_color;
 
-
+const float INFINITY = 1.0 / 0.0;
 const float DISTANCE_MAX_VS = 64.0;
 const float THICKNESS_RADIUS_VS = 2.5;
 const uint STEPS_MAX = 32;
@@ -100,7 +100,6 @@ float raypath_depth_ndc(raypath rp) {
 
 // source: https://zznewclear13.github.io/posts/screen-space-reflection-en/#frustum-clipping
 vec3 segment_end_clip_vs_from(vec3 origin_vs, vec3 end_vs, vec2 near_far_clip_distances, vec2 near_plane_half_size) {
-    const float INFINITY = 1.0 / 0.0;
     origin_vs.z *= -1.0;
     end_vs.z *= -1.0;
 
@@ -168,7 +167,8 @@ vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float 
 }
 
 vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
-    const bool FRUSTUM_CLIP = false;
+    const bool FRUSTUM_CLIP = true;
+    const bool BSEARCH = true;
     vec3 end_vs = origin_vs + direction_vs * max_distance_vs;
     if (FRUSTUM_CLIP) {
         end_vs = segment_end_clip_vs(origin_vs, end_vs);
@@ -184,6 +184,9 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
 
     float w = 0.0;
     float dw = 1.0 / float(STEPS_MAX);
+    float potential_w = 0.0;
+    float min_depth_difference_ndc = INFINITY;
+    float previous_depth_difference_ndc;
 
     vec2 sample_uv;
     float sample_depth_ndc01;
@@ -200,20 +203,36 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
         normal_depth_sample nd = normal_depth_from_sampler(sample_uv);
         sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
+        float depth_difference_ndc = ray_depth_ndc - sample_depth_ndc;
 
-        if (
-            ray_depth_ndc >= sample_depth_ndc
-            && ray_front_depth_ndc <= sample_depth_ndc
-            && dot(direction_vs, nd.normal_vs) < 0.0
-        ) {
-            const float BSEARCH = 0.0;
-            vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 1.0);
-            vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, w, w - dw);
-            return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w * BSEARCH);
+        if (depth_difference_ndc >= 0.0) {
+            if (
+                ray_front_depth_ndc <= sample_depth_ndc
+                && dot(direction_vs, nd.normal_vs) < 0.0
+            ) {
+                vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 1.0);
+                if (BSEARCH) {
+                    vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, w, w - dw);
+                    return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
+                } else {
+                    return hit_uv;
+                }
+            } else if (
+                previous_depth_difference_ndc < 0.0
+                && depth_difference_ndc < min_depth_difference_ndc
+            ) {
+                min_depth_difference_ndc = depth_difference_ndc;
+                potential_w = w;
+            }
         }
+        previous_depth_difference_ndc = depth_difference_ndc;
     }
 
-    return vec4(sample_uv, sample_depth_ndc01, 0.0);
+    if (BSEARCH && potential_w > 0.0) {
+        return intersection_binary_search_uv(rp, rp_front, potential_w, potential_w - dw);
+    } else {
+        return vec4(sample_uv, sample_depth_ndc01, 0.0);
+    }
 }
 
 
