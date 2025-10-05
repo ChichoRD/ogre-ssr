@@ -12,6 +12,7 @@ layout(location = 0) in vec2 in_uv;
 layout(location = 0) out vec4 out_fragment_color;
 
 
+const uint UINT_MAX = 0xffffffffu;
 const float INFINITY = 1.0 / 0.0;
 const float EPSILON = 0.0001;
 const float FAR_MAX_NDC = 1.0 - EPSILON;
@@ -28,6 +29,9 @@ const float REFLECTION_POWER_BIAS = 8.0;
 
 const uint STEPS_MAX = 32;
 const uint STEPS_BSEARCH_MAX = 8;
+
+const bool FRUSTUM_CLIP_ENABLE = true;
+const bool BSEARCH_ENABLE = true;
 
 
 struct normal_depth_rough_sample {
@@ -234,10 +238,8 @@ vec4 intersection_binary_minimization_uv(raypath rp, vec3 origin_vs, vec3 end_vs
 }
 
 vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
-    const bool FRUSTUM_CLIP = true;
-    const bool BSEARCH = true;
     vec3 end_vs = origin_vs + direction_vs * max_distance_vs;
-    if (FRUSTUM_CLIP) {
+    if (FRUSTUM_CLIP_ENABLE) {
         end_vs = segment_end_clip_vs(origin_vs, end_vs);
     }
     vec4 origin_cs = position_cs_from_vs(origin_vs);
@@ -278,7 +280,7 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
                 && dot(direction_vs, nd.normal_vs) < 0.0
             ) {
                 vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 1.0);
-                if (BSEARCH) {
+                if (BSEARCH_ENABLE) {
                     vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, w, w - dw);
                     return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
                 } else {
@@ -296,7 +298,7 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
     }
 
     vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 0.0);
-    if (BSEARCH && potential_w > 0.0) {
+    if (BSEARCH_ENABLE && potential_w > 0.0) {
         vec4 bsearch_hit_uv = intersection_binary_minimization_uv(rp, origin_vs, end_vs, min_depth_difference_ndc, potential_w, potential_w - dw);
         // vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, potential_w, potential_w - dw);
         return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
@@ -344,6 +346,39 @@ float luminance_from_rgb(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
 
+// source: https://www.shadertoy.com/view/XlGcRh
+uvec2 pcg2d(uvec2 v) {
+    v = v * 1664525u + 1013904223u;
+
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+
+    v = v ^ (v>>16u);
+
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+
+    v = v ^ (v>>16u);
+
+    return v;
+}
+// http://www.jcgt.org/published/0009/03/02/
+uvec3 pcg3d(uvec3 v) {
+
+    v = v * 1664525u + 1013904223u;
+
+    v.x += v.y*v.z;
+    v.y += v.z*v.x;
+    v.z += v.x*v.y;
+
+    v ^= v >> 16u;
+
+    v.x += v.y*v.z;
+    v.y += v.z*v.x;
+    v.z += v.x*v.y;
+
+    return v;
+}
 
 void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
@@ -362,7 +397,15 @@ void main() {
     vec3 view_direction_vs = normalize(position_vs);
     vec3 reflection_direction_vs = normalize(reflect(view_direction_vs, normal_vs));
 
-    vec4 hit_uv = intersection_raymarch_uv(position_vs, reflection_direction_vs, DISTANCE_MAX_VS);
+    float roughness_factor = pow(1.0 - ndr.roughness, ROUGHNESS_POWER);
+
+    // vec2 s = in_uv.xy * float(UINT_MAX);
+    // uvec4 u = uvec4(s, uint(s.x) ^ uint(s.y), uint(s.x) + uint(s.y));
+    // vec3 jitter = (vec3(pcg3d(u.xyz)) / float(UINT_MAX)) * 2.0 - 1.0;
+    // vec3 ray_direction_vs = reflection_direction_vs + normal_vs * jitter * (1.0 - roughness_factor) * 0.1;
+    vec3 ray_direction_vs = reflection_direction_vs;
+
+    vec4 hit_uv = intersection_raymarch_uv(position_vs, ray_direction_vs, DISTANCE_MAX_VS);
     vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
 
     float fresnel_factor = pow(1.0 - max(dot(-view_direction_vs, normal_vs), 0.0), FRESNEL_POWER);
@@ -372,11 +415,15 @@ void main() {
     float luminance_factor = pow(hit_luminance / (scene_luminance + 1.0), LUMINANCE_POWER);
 
     float front_ray_factor = pow(1.0 - max(dot(reflection_direction_vs, vec3(0.0, 0.0, 1.0)), 0.0), FRONT_RAY_DISCARD_POWER);
-    float roughness_factor = pow(1.0 - ndr.roughness, ROUGHNESS_POWER);
     vec4 reflection_color = mix(
         scene_color,
         hit_color,
-        front_ray_factor * pow(fresnel_factor * luminance_factor * roughness_factor, 1.0 / REFLECTION_POWER_BIAS)
+        front_ray_factor * pow(
+            fresnel_factor
+                * luminance_factor
+                * roughness_factor,
+            1.0 / REFLECTION_POWER_BIAS
+        )
     );
 
     if (hit_uv.w == 0.0) {
@@ -384,4 +431,6 @@ void main() {
     } else {
         out_fragment_color = reflection_color;
     }
+    // out_fragment_color = vec4(ray_direction_vs, 1.0);
+    // out_fragment_color = hit_uv;
 }
