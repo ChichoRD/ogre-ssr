@@ -20,13 +20,13 @@ const float FAR_MAX_NDC = 1.0 - EPSILON;
 const float DISTANCE_MAX_VS = 16.0;
 const float THICKNESS_RADIUS_VS = 0.5;
 
-const float ROUGHNESS_POWER             =  0.0;
-const float FRESNEL_POWER               =  0.0;
-const float LUMINANCE_POWER             =  0.0;
-const float FRONT_RAY_DISCARD_POWER     =  0.0;
-const float REFLECTION_POWER_BIAS       =  1.0;
+const float ROUGHNESS_POWER             =  1.2;
+const float FRESNEL_POWER               =  1.2;
+const float LUMINANCE_POWER             =  1.2;
+const float FRONT_RAY_DISCARD_POWER     =  16.0;
+const float REFLECTION_POWER_BIAS       =  8.0;
 
-const uint STEPS_MAX = 16;
+const uint STEPS_MAX = 64;
 const uint STEPS_BSEARCH_MAX = 8;
 
 const bool FRUSTUM_CLIP_ENABLE = true;
@@ -148,7 +148,9 @@ vec4 intersection_binary_search_uv(vec4 origin_cs, vec4 end_cs, vec4 origin_fron
     return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
 }
 
-vec4 intersection_binary_minimization_uv(vec4 origin_cs, vec4 end_cs, vec4 origin_front_cs, vec4 end_front_cs, float min_depth_difference_ndc, float w, float prev_w) {
+vec4 intersection_binary_minimization_uv(
+    vec4 origin_cs, vec4 end_cs, vec4 origin_front_cs, vec4 end_front_cs, float min_depth_difference_ndc, float w, float prev_w
+) {
     vec2 hit_sample_uv = vec2(0.0);
     float hit_sample_depth_ndc01 = 0.0;
     float hit = 0.0;
@@ -168,13 +170,15 @@ vec4 intersection_binary_minimization_uv(vec4 origin_cs, vec4 end_cs, vec4 origi
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
         float depth_difference_ndc = ray_depth_ndc - sample_depth_ndc;
 
-        if (depth_difference_ndc >= 0.0 && (depth_difference_ndc) < min_depth_difference_ndc) {
+        if (depth_difference_ndc >= 0.0) {
             w = mid_w;
             if (ray_front_depth_ndc <= sample_depth_ndc) {
-                hit_sample_depth_ndc01 = sample_depth_ndc01;
-                hit_sample_uv = sample_uv;
-                hit = 1.0;
-                min_depth_difference_ndc = depth_difference_ndc;
+                if (depth_difference_ndc < min_depth_difference_ndc) {
+                    hit_sample_depth_ndc01 = sample_depth_ndc01;
+                    hit_sample_uv = sample_uv;
+                    hit = 1.0;
+                    min_depth_difference_ndc = depth_difference_ndc;
+                } 
             } else {
                 w = (w + prev_w) * 0.5;
             }
@@ -218,7 +222,7 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
         float depth_difference_ndc = ray_depth_ndc - sample_depth_ndc;
 
-        if (depth_difference_ndc >= 0.0) {
+        if (depth_difference_ndc >= 0.0 && dot(direction_vs, nd.normal_vs) < 0.0) {
             if (ray_front_depth_ndc <= sample_depth_ndc) {
                 vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 1.0);
                 if (BSEARCH_ENABLE) {
@@ -360,9 +364,7 @@ void main() {
         scene_color,
         hit_color,
         front_ray_factor * pow(
-            fresnel_factor
-                * luminance_factor
-                * roughness_factor,
+            fresnel_factor * max(luminance_factor, roughness_factor),
             1.0 / REFLECTION_POWER_BIAS
         )
     );
