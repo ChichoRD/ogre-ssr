@@ -101,7 +101,7 @@ static auto ssr_compositor_create_pipelines(ssr_compositor &self, Ogre::Composit
                 pass_clear.setInputMode(Ogre::CompositionTargetPass::IM_NONE);
                 pass_clear.setOutputName(rt_out_ndr_name); {
                     Ogre::CompositionPass *pass = pass_clear.createPass(Ogre::CompositionPass::PT_CLEAR);
-                    pass->setClearColour(Ogre::ColourValue(0, 0, 1, 0));
+                    pass->setClearColour(Ogre::ColourValue(0, 0, 1, 1));
                     pass->setClearDepth(1.0f);
                     pass->setClearBuffers(Ogre::FBT_COLOUR | Ogre::FBT_DEPTH);
                 }

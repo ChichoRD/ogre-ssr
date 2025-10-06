@@ -17,17 +17,16 @@ const float INFINITY = 1.0 / 0.0;
 const float EPSILON = 0.0001;
 const float FAR_MAX_NDC = 1.0 - EPSILON;
 
-const float DISTANCE_MAX_VS = 64.0;
-const float THICKNESS_RADIUS_VS = 0.005;
-const float THICKNESS_RADIUS_BMINIMIZATION_VS = THICKNESS_RADIUS_VS * 100.0;
+const float DISTANCE_MAX_VS = 16.0;
+const float THICKNESS_RADIUS_VS = 0.5;
 
-const float ROUGHNESS_POWER = 1.2;
-const float FRESNEL_POWER = 1.2;
-const float LUMINANCE_POWER = 1.2;
-const float FRONT_RAY_DISCARD_POWER = 16.0;
-const float REFLECTION_POWER_BIAS = 8.0;
+const float ROUGHNESS_POWER             =  0.0;
+const float FRESNEL_POWER               =  0.0;
+const float LUMINANCE_POWER             =  0.0;
+const float FRONT_RAY_DISCARD_POWER     =  0.0;
+const float REFLECTION_POWER_BIAS       =  1.0;
 
-const uint STEPS_MAX = 32;
+const uint STEPS_MAX = 64;
 const uint STEPS_BSEARCH_MAX = 8;
 
 const bool FRUSTUM_CLIP_ENABLE = true;
@@ -81,44 +80,6 @@ float depth_vs_from_ndc01(float depth_ndc01) {
 }
 
 
-struct raypath {
-    vec3 cs_xyz0;
-    vec3 cs_xyz1;
-
-    float cs_rcp_w0;
-    float cs_rcp_w1;
-
-    vec2 ndc_xy0;
-    vec2 ndc_xy1;
-};
-raypath raypath_create(vec4 origin_cs, vec4 end_cs) {
-    raypath rp;
-    rp.cs_xyz0 = origin_cs.xyz;
-    rp.cs_xyz1 = end_cs.xyz;
-
-    rp.cs_rcp_w0 = 1.0 / origin_cs.w;
-    rp.cs_rcp_w1 = 1.0 / end_cs.w;
-
-    rp.ndc_xy0 = origin_cs.xy * rp.cs_rcp_w0;
-    rp.ndc_xy1 = end_cs.xy * rp.cs_rcp_w1;
-    return rp;
-}
-raypath raypath_lerp(raypath rp, float t) {
-    raypath rpl;
-    rpl.cs_xyz0 = rp.cs_xyz0;
-    rpl.cs_rcp_w0 = rp.cs_rcp_w0;
-    rpl.ndc_xy0 = rp.ndc_xy0;
-
-    rpl.cs_xyz1 = mix(rp.cs_xyz0, rp.cs_xyz1, t);
-    rpl.cs_rcp_w1 = mix(rp.cs_rcp_w0, rp.cs_rcp_w1, t);
-    rpl.ndc_xy1 = mix(rp.ndc_xy0, rp.ndc_xy1, t);
-    return rpl;
-}
-float raypath_depth_ndc(raypath rp) {
-    return rp.cs_xyz1.z * rp.cs_rcp_w1;
-} 
-
-
 // source: https://zznewclear13.github.io/posts/screen-space-reflection-en/#frustum-clipping
 vec3 segment_end_clip_vs_from(vec3 origin_vs, vec3 end_vs, vec2 near_far_clip_distances, vec2 near_plane_half_size) {
     origin_vs.z *= -1.0;
@@ -153,20 +114,20 @@ vec3 segment_end_clip_vs(vec3 origin_vs, vec3 end_vs) {
 }
 
 
-vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float prev_w) {
+vec4 intersection_binary_search_uv(vec4 origin_cs, vec4 end_cs, vec4 origin_front_cs, vec4 end_front_cs, float w, float prev_w) {
     vec2 hit_sample_uv = vec2(0.0);
     float hit_sample_depth_ndc01 = 0.0;
     float hit = 0.0;
     for (uint i = 0; i < STEPS_BSEARCH_MAX; ++i) {
         float mid_w = (w + prev_w) * 0.5;
 
-        raypath rpl = raypath_lerp(rp, mid_w);
-        raypath rpl_front = raypath_lerp(rp_front, mid_w);
+        vec4 position_cs = mix(origin_cs, end_cs, mid_w);
+        vec4 position_front_cs = mix(origin_front_cs, end_front_cs, mid_w);
 
-        float ray_depth_ndc = raypath_depth_ndc(rpl);
-        float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
+        float ray_depth_ndc = position_cs.z / position_cs.w;
+        float ray_front_depth_ndc = position_front_cs.z / position_front_cs.w;
 
-        vec2 sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
+        vec2 sample_uv = position_uv_from_ndc(vec3(position_cs.xy / position_cs.w, ray_depth_ndc)).xy;
         normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
         float sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
@@ -191,26 +152,21 @@ vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float 
     return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
 }
 
-vec4 intersection_binary_minimization_uv(raypath rp, vec3 origin_vs, vec3 end_vs, float min_depth_difference_ndc, float w, float prev_w) {
+vec4 intersection_binary_minimization_uv(vec4 origin_cs, vec4 end_cs, vec4 origin_front_cs, vec4 end_front_cs, float min_depth_difference_ndc, float w, float prev_w) {
     vec2 hit_sample_uv = vec2(0.0);
     float hit_sample_depth_ndc01 = 0.0;
     float hit = 0.0;
 
-    raypath rp_front = raypath_create(
-        position_cs_from_vs(origin_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_BMINIMIZATION_VS)),
-        position_cs_from_vs(end_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_BMINIMIZATION_VS))
-    );
-
     for (uint i = 0; i < STEPS_BSEARCH_MAX; ++i) {
         float mid_w = (w + prev_w) * 0.5;
 
-        raypath rpl = raypath_lerp(rp, mid_w);
-        raypath rpl_front = raypath_lerp(rp_front, mid_w);
+        vec4 position_cs = mix(origin_cs, end_cs, mid_w);
+        vec4 position_front_cs = mix(origin_front_cs, end_front_cs, mid_w);
 
-        float ray_depth_ndc = raypath_depth_ndc(rpl);
-        float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
+        float ray_depth_ndc = position_cs.z / position_cs.w;
+        float ray_front_depth_ndc = position_front_cs.z / position_front_cs.w;
 
-        vec2 sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
+        vec2 sample_uv = position_uv_from_ndc(vec3(position_cs.xy / position_cs.w, ray_depth_ndc)).xy;
         normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
         float sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
@@ -237,38 +193,35 @@ vec4 intersection_binary_minimization_uv(raypath rp, vec3 origin_vs, vec3 end_vs
     return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
 }
 
-vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
+vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs, out uint steps) {
     vec3 end_vs = origin_vs + direction_vs * max_distance_vs;
     if (FRUSTUM_CLIP_ENABLE) {
         end_vs = segment_end_clip_vs(origin_vs, end_vs);
     }
     vec4 origin_cs = position_cs_from_vs(origin_vs);
     vec4 end_cs = position_cs_from_vs(end_vs);
-
-    raypath rp = raypath_create(origin_cs, end_cs);
-    raypath rp_front = raypath_create(
-        position_cs_from_vs(origin_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_VS)),
-        position_cs_from_vs(end_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_VS))
-    );
+    vec4 origin_front_cs = position_cs_from_vs(origin_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_VS));
+    vec4 end_front_cs = position_cs_from_vs(end_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_VS));
 
     float w = 0.0;
     float dw = 1.0 / float(STEPS_MAX);
     float potential_w = 0.0;
     float min_depth_difference_ndc = INFINITY;
-    float previous_depth_difference_ndc;
+    float previous_depth_difference_ndc = -1.0;
 
     vec2 sample_uv;
     float sample_depth_ndc01;
     for (uint i = 0; i < STEPS_MAX; ++i) {
+        steps = i;
         w += dw;
 
-        raypath rpl = raypath_lerp(rp, w);
-        raypath rpl_front = raypath_lerp(rp_front, w);
+        vec4 position_cs = mix(origin_cs, end_cs, w);
+        vec4 position_front_cs = mix(origin_front_cs, end_front_cs, w);
 
-        float ray_depth_ndc = raypath_depth_ndc(rpl);
-        float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
+        float ray_depth_ndc = position_cs.z / position_cs.w;
+        float ray_front_depth_ndc = position_front_cs.z / position_front_cs.w;
 
-        sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
+        sample_uv = position_uv_from_ndc(vec3(position_cs.xy / position_cs.w, ray_depth_ndc)).xy;
         normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
         sample_depth_ndc01 = nd.depth_ndc01;
         float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
@@ -277,18 +230,20 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
         if (depth_difference_ndc >= 0.0) {
             if (
                 ray_front_depth_ndc <= sample_depth_ndc
-                && dot(direction_vs, nd.normal_vs) < 0.0
+                // && dot(direction_vs, nd.normal_vs) < 0.0
             ) {
                 vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 1.0);
                 if (BSEARCH_ENABLE) {
-                    vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, w, w - dw);
+                    vec4 bsearch_hit_uv = intersection_binary_search_uv(
+                        origin_cs, end_cs, origin_front_cs, end_front_cs, w, w - dw
+                    );
                     return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
                 } else {
                     return hit_uv;
                 }
             } else if (
-                previous_depth_difference_ndc < 0.0
-                && depth_difference_ndc < min_depth_difference_ndc
+                // previous_depth_difference_ndc < 0.0
+                depth_difference_ndc < min_depth_difference_ndc
             ) {
                 min_depth_difference_ndc = depth_difference_ndc;
                 potential_w = w;
@@ -299,8 +254,9 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
 
     vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 0.0);
     if (BSEARCH_ENABLE && potential_w > 0.0) {
-        vec4 bsearch_hit_uv = intersection_binary_minimization_uv(rp, origin_vs, end_vs, min_depth_difference_ndc, potential_w, potential_w - dw);
-        // vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, potential_w, potential_w - dw);
+        vec4 bsearch_hit_uv = intersection_binary_minimization_uv(
+            origin_cs, end_cs, origin_front_cs, end_front_cs, min_depth_difference_ndc, potential_w, potential_w - dw
+        );
         return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
     } else {
         return hit_uv;
@@ -405,7 +361,8 @@ void main() {
     // vec3 ray_direction_vs = reflection_direction_vs + normal_vs * jitter * (1.0 - roughness_factor) * 0.1;
     vec3 ray_direction_vs = reflection_direction_vs;
 
-    vec4 hit_uv = intersection_raymarch_uv(position_vs, ray_direction_vs, DISTANCE_MAX_VS);
+    uint steps;
+    vec4 hit_uv = intersection_raymarch_uv(position_vs, ray_direction_vs, DISTANCE_MAX_VS, steps);
     vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
 
     float fresnel_factor = pow(1.0 - max(dot(-view_direction_vs, normal_vs), 0.0), FRESNEL_POWER);
@@ -431,6 +388,7 @@ void main() {
     } else {
         out_fragment_color = reflection_color;
     }
-    // out_fragment_color = vec4(ray_direction_vs, 1.0);
-    // out_fragment_color = hit_uv;
+    // if (in_uv.x < 0.5) {
+    //     out_fragment_color = vec4(float(steps) / float(STEPS_MAX));
+    // }
 }

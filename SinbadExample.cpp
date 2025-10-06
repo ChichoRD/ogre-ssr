@@ -166,4 +166,14 @@ void SinbadExample::setupScene(void) {
     sideplane_node->setPosition(-7.5, 2.5, 0);
     sideplane_node->yaw(Ogre::Degree(90));
     sideplane_node->pitch(Ogre::Degree(90));
+
+    // sphere
+    Ogre::Entity *sphere = mSM->createEntity("Sphere", "sphere.mesh");
+    sphere->getSubEntity(0)->setMaterialName("Examples/Chrome");
+    // sphere->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(1.0, 1.0, 1.0, 1.0);
+    // sphere->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(32.0f);
+    Ogre::SceneNode *sphereNode = mSM->getRootSceneNode()->createChildSceneNode("nSphere");
+    sphereNode->attachObject(sphere);
+    sphereNode->setPosition(-5, -5, 5);
+    sphereNode->setScale(0.02, 0.02, 0.02);
 }
