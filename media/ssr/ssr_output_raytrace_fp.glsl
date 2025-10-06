@@ -2,266 +2,435 @@
 
 uniform sampler2D scene_colour_texture;
 uniform sampler2D normal_depth_rough_texture;
-uniform mat4 i_projection_matrix;
-uniform mat4 projection_matrix;
+uniform mat4 raytrace_i_projection_matrix;
+uniform mat4 raytrace_projection_matrix;
 
+uniform float near_clip_plane;
 uniform float far_clip_plane;
-uniform vec4 texel_size;
 
 layout(location = 0) in vec2 in_uv;
 layout(location = 0) out vec4 out_fragment_color;
 
-// Ray marching parameters
-const uint MAX_STEPS_RAYMARCH = 64;
-const uint MAX_STEPS_BSEARCH = 16;
-const float STEP_SIZE_VS = 0.02;
-const float MAX_DISTANCE_VS = 50.0;
-const float DEPTH_THRESHOLD_VS = 0.001;
-const float MIN_STEP_SIZE = 0.001;
 
-// Ray marching state tracking
-struct RayMarchState {
-    vec3 current_pos_vs;
-    vec3 previous_pos_vs;
-    float current_depth_vs;
-    float previous_depth_vs;
-    float sampled_depth_vs;
-    vec2 current_uv;
-    bool hit_found;
-    uint step_count;
+const uint UINT_MAX = 0xffffffffu;
+const float INFINITY = 1.0 / 0.0;
+const float EPSILON = 0.0001;
+const float FAR_MAX_NDC = 1.0 - EPSILON;
+
+const float DISTANCE_MAX_VS = 64.0;
+const float THICKNESS_RADIUS_VS = 0.005;
+const float THICKNESS_RADIUS_BMINIMIZATION_VS = THICKNESS_RADIUS_VS * 100.0;
+
+const float ROUGHNESS_POWER = 1.2;
+const float FRESNEL_POWER = 1.2;
+const float LUMINANCE_POWER = 1.2;
+const float FRONT_RAY_DISCARD_POWER = 16.0;
+const float REFLECTION_POWER_BIAS = 8.0;
+
+const uint STEPS_MAX = 32;
+const uint STEPS_BSEARCH_MAX = 8;
+
+const bool FRUSTUM_CLIP_ENABLE = true;
+const bool BSEARCH_ENABLE = true;
+
+
+struct normal_depth_rough_sample {
+    vec3 normal_vs;
+    float depth_ndc01;
+    float roughness;
 };
+normal_depth_rough_sample normal_depth_rough_from_sampler(vec2 uv) {
+    vec4 nd = texture(normal_depth_rough_texture, uv);
+    vec3 normal_vs = normalize(vec3(nd.xy, sqrt(1.0 - dot(nd.xy, nd.xy))));
+    float depth_ndc01 = nd.z;
+    float roughness = nd.w;
+    normal_depth_rough_sample result;
+    result.normal_vs = normal_vs;
+    result.depth_ndc01 = depth_ndc01;
+    result.roughness = roughness;
+    return result;
+}
 
-// === Coordinate transformation utilities ===
-vec3 position_vs_from_depth_ndc(vec2 uv, float depth_ndc) {
-    vec2 xy_ndc = uv * 2.0 - vec2(1.0);
-    vec4 pos_ndc = vec4(xy_ndc, depth_ndc, 1.0);
-    vec4 pos_vs = i_projection_matrix * pos_ndc;
-    pos_vs.z *= -1.0;
+
+vec4 position_cs_from_vs(vec3 position_vs) {
+    return raytrace_projection_matrix * vec4(position_vs, 1.0);
+}
+vec3 position_ndc_from_cs(vec4 position_cs) {
+    return position_cs.xyz / position_cs.w;
+}
+vec3 position_uv_from_ndc(vec3 position_ndc) {
+    return vec3(position_ndc.x * 0.5 + 0.5, 0.5 - position_ndc.y * 0.5, position_ndc.z * 0.5 + 0.5);
+}
+
+vec3 position_ndc_from_uv(vec3 uv) {
+    return vec3(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, uv.z * 2.0 - 1.0);
+}
+vec3 position_vs_from_ndc(vec3 position_ndc) {
+    vec4 pos_vs = raytrace_i_projection_matrix * vec4(position_ndc, 1.0);
     return pos_vs.xyz / pos_vs.w;
 }
 
-vec3 position_ndc_from_vs(vec3 position_vs) {
-    vec4 pos_ndc = projection_matrix * vec4(position_vs, 1.0);
-    pos_ndc.yz *= -1.0;
-    return pos_ndc.xyz / pos_ndc.w;
+// source: https://stackoverflow.com/a/46118945
+// BUG: precission issues compared to full inv matrix multiplication
+float depth_vs_from_ndc01(float depth_ndc01) {
+    float A     = raytrace_projection_matrix[2][2];
+    float B     = raytrace_projection_matrix[3][2];
+    float z_ndc = 2.0 * depth_ndc01 - 1.0;
+    float z_vs = B / (A + z_ndc);
+    return -z_vs;
 }
 
-vec2 uv_from_position_ndc(vec3 position_ndc) {
-    return vec2(position_ndc.x * 0.5 + 0.5, 0.5 - position_ndc.y * 0.5);
+
+struct raypath {
+    vec3 cs_xyz0;
+    vec3 cs_xyz1;
+
+    float cs_rcp_w0;
+    float cs_rcp_w1;
+
+    vec2 ndc_xy0;
+    vec2 ndc_xy1;
+};
+raypath raypath_create(vec4 origin_cs, vec4 end_cs) {
+    raypath rp;
+    rp.cs_xyz0 = origin_cs.xyz;
+    rp.cs_xyz1 = end_cs.xyz;
+
+    rp.cs_rcp_w0 = 1.0 / origin_cs.w;
+    rp.cs_rcp_w1 = 1.0 / end_cs.w;
+
+    rp.ndc_xy0 = origin_cs.xy * rp.cs_rcp_w0;
+    rp.ndc_xy1 = end_cs.xy * rp.cs_rcp_w1;
+    return rp;
+}
+raypath raypath_lerp(raypath rp, float t) {
+    raypath rpl;
+    rpl.cs_xyz0 = rp.cs_xyz0;
+    rpl.cs_rcp_w0 = rp.cs_rcp_w0;
+    rpl.ndc_xy0 = rp.ndc_xy0;
+
+    rpl.cs_xyz1 = mix(rp.cs_xyz0, rp.cs_xyz1, t);
+    rpl.cs_rcp_w1 = mix(rp.cs_rcp_w0, rp.cs_rcp_w1, t);
+    rpl.ndc_xy1 = mix(rp.ndc_xy0, rp.ndc_xy1, t);
+    return rpl;
+}
+float raypath_depth_ndc(raypath rp) {
+    return rp.cs_xyz1.z * rp.cs_rcp_w1;
+} 
+
+
+// source: https://zznewclear13.github.io/posts/screen-space-reflection-en/#frustum-clipping
+vec3 segment_end_clip_vs_from(vec3 origin_vs, vec3 end_vs, vec2 near_far_clip_distances, vec2 near_plane_half_size) {
+    origin_vs.z *= -1.0;
+    end_vs.z *= -1.0;
+
+    vec3 dir = end_vs - origin_vs;
+    vec3 signDir = sign(dir);
+
+    float nfSlab = signDir.z * (near_far_clip_distances.y - near_far_clip_distances.x) * 0.5f + (near_far_clip_distances.y + near_far_clip_distances.x) * 0.5f;
+    float lenZ = (nfSlab - origin_vs.z) / dir.z;
+    if (dir.z == 0.0f) lenZ = INFINITY;
+
+    vec2 ss = sign(dir.xy - near_plane_half_size * dir.z) * near_plane_half_size;
+    vec2 denom = ss * dir.z - dir.xy;
+    vec2 lenXY = (origin_vs.xy - ss * origin_vs.z) / denom;
+    if (lenXY.x < 0.0f || denom.x == 0.0f) lenXY.x = INFINITY;
+    if (lenXY.y < 0.0f || denom.y == 0.0f) lenXY.y = INFINITY;
+
+    float len = min(min(1.0f, lenZ), min(lenXY.x, lenXY.y));
+    vec3 clippedVS = origin_vs + dir * len;
+
+    clippedVS.z *= -1.0;
+    return clippedVS;
+}
+vec3 segment_end_clip_vs(vec3 origin_vs, vec3 end_vs) {
+    return segment_end_clip_vs_from(
+        origin_vs,
+        end_vs,
+        vec2(near_clip_plane, far_clip_plane),
+        vec2(1.0, 1.0) / vec2(raytrace_projection_matrix[0][0], raytrace_projection_matrix[1][1])
+    );
 }
 
-bool is_uv_valid(vec2 uv) {
-    return uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
-}
 
-// === Ray marching utilities ===
-float sample_depth_vs(vec2 uv) {
-    if (!is_uv_valid(uv)) return -far_clip_plane; // Return far depth (most negative)
-    return position_vs_from_depth_ndc(uv, texture(normal_depth_rough_texture, uv).w).z;
-}
+vec4 intersection_binary_search_uv(raypath rp, raypath rp_front, float w, float prev_w) {
+    vec2 hit_sample_uv = vec2(0.0);
+    float hit_sample_depth_ndc01 = 0.0;
+    float hit = 0.0;
+    for (uint i = 0; i < STEPS_BSEARCH_MAX; ++i) {
+        float mid_w = (w + prev_w) * 0.5;
 
-bool check_intersection(RayMarchState state) {
-    // In Ogre view space: +z out of screen, -z into screen (depths are negative)
-    // As we march away from camera, depth becomes MORE negative
-    float ray_depth_change = state.current_depth_vs - state.previous_depth_vs;
-    
-    // Prevent self-intersection by ensuring we've moved a minimum distance
-    if (abs(ray_depth_change) < MIN_STEP_SIZE) return false;
-    
-    // Check if the sampled surface depth falls between previous and current ray depths
-    // Since depths are negative, "deeper" means more negative
-    bool depth_crossed = (state.previous_depth_vs >= state.sampled_depth_vs && 
-                         state.current_depth_vs <= state.sampled_depth_vs) ||
-                        (state.previous_depth_vs <= state.sampled_depth_vs && 
-                         state.current_depth_vs >= state.sampled_depth_vs);
-    
-    // Ensure we're moving into the scene (more negative z) and hit something closer to camera
-    bool moving_into_scene = ray_depth_change < 0.0; // becoming more negative
-    bool hit_surface_closer = state.sampled_depth_vs > state.current_depth_vs; // surface is less negative (closer)
-    
-    return depth_crossed && moving_into_scene && hit_surface_closer && 
-           abs(state.current_depth_vs - state.sampled_depth_vs) < DEPTH_THRESHOLD_VS;
-}
+        raypath rpl = raypath_lerp(rp, mid_w);
+        raypath rpl_front = raypath_lerp(rp_front, mid_w);
 
-vec2 binary_search_intersection(vec3 start_pos_vs, vec3 end_pos_vs, out float final_sampled_depth_vs, out float final_depth_difference_vs) {
-    vec3 current_pos_vs = end_pos_vs;
-    vec3 step_vs = (end_pos_vs - start_pos_vs) * 0.5;
-    vec2 final_uv;
-    
-    for (uint i = 0; i < MAX_STEPS_BSEARCH; ++i) {
-        step_vs *= 0.5;
-        vec3 test_pos_ndc = position_ndc_from_vs(current_pos_vs);
-        final_uv = uv_from_position_ndc(test_pos_ndc);
-        
-        if (!is_uv_valid(final_uv)) {
-            current_pos_vs -= step_vs;
-            continue;
-        }
-        
-        final_sampled_depth_vs = sample_depth_vs(final_uv);
-        final_depth_difference_vs = current_pos_vs.z - final_sampled_depth_vs;
-        
-        // In Ogre view space with negative depths:
-        // If depth_difference > 0: ray is behind surface (ray more negative than surface)
-        // If depth_difference < 0: ray is in front of surface (ray less negative than surface)
-        if (final_depth_difference_vs < 0.0) {
-            // Ray is in front of surface, move backwards along ray (towards start)
-            current_pos_vs -= step_vs;
+        float ray_depth_ndc = raypath_depth_ndc(rpl);
+        float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
+
+        vec2 sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
+        normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
+        float sample_depth_ndc01 = nd.depth_ndc01;
+        float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
+
+        if (
+            ray_depth_ndc >= sample_depth_ndc
+            // && ray_front_depth_ndc <= sample_depth_ndc
+            // && dot(normalize(rpl.cs_xyz1), nd.normal_vs) < 0.0
+        ) {
+            w = mid_w;
+            if (ray_front_depth_ndc <= sample_depth_ndc) {
+                hit_sample_uv = sample_uv;
+                hit_sample_depth_ndc01 = sample_depth_ndc01;
+                hit = 1.0;
+            } else {
+                w = (w + prev_w) * 0.5;
+            }
         } else {
-            // Ray is behind surface, move forward along ray (towards end)
-            current_pos_vs += step_vs;
+            prev_w = mid_w;
         }
     }
-    
-    return final_uv;
+    return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
 }
 
-vec2 raymarch_improved(vec3 origin_vs, vec3 direction_vs, out float hit_sampled_depth_vs, out float depth_difference_vs, out uint steps) {
-    RayMarchState state;
-    state.current_pos_vs = origin_vs;
-    state.previous_pos_vs = origin_vs;
-    state.hit_found = false;
-    state.step_count = 0;
-    
-    vec3 step_vs = normalize(direction_vs) * STEP_SIZE_VS;
-    float total_distance = 0.0;
-    
-    // Initialize previous depth
-    state.previous_depth_vs = origin_vs.z;
-    
-    // Skip the first small step to avoid immediate self-intersection
-    vec3 initial_step = step_vs * 0.1;
-    state.current_pos_vs += initial_step;
-    
-    for (steps = 1; steps < MAX_STEPS_RAYMARCH && total_distance < MAX_DISTANCE_VS; ++steps) {
-        // Store previous state
-        state.previous_pos_vs = state.current_pos_vs;
-        state.previous_depth_vs = state.current_depth_vs;
-        
-        // Advance ray
-        state.current_pos_vs += step_vs;
-        total_distance += length(step_vs);
-        
-        // Calculate current state
-        vec3 current_pos_ndc = position_ndc_from_vs(state.current_pos_vs);
-        state.current_uv = uv_from_position_ndc(current_pos_ndc);
-        
-        // Check if we're still in valid screen space
-        if (!is_uv_valid(state.current_uv)) {
-            break;
+vec4 intersection_binary_minimization_uv(raypath rp, vec3 origin_vs, vec3 end_vs, float min_depth_difference_ndc, float w, float prev_w) {
+    vec2 hit_sample_uv = vec2(0.0);
+    float hit_sample_depth_ndc01 = 0.0;
+    float hit = 0.0;
+
+    raypath rp_front = raypath_create(
+        position_cs_from_vs(origin_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_BMINIMIZATION_VS)),
+        position_cs_from_vs(end_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_BMINIMIZATION_VS))
+    );
+
+    for (uint i = 0; i < STEPS_BSEARCH_MAX; ++i) {
+        float mid_w = (w + prev_w) * 0.5;
+
+        raypath rpl = raypath_lerp(rp, mid_w);
+        raypath rpl_front = raypath_lerp(rp_front, mid_w);
+
+        float ray_depth_ndc = raypath_depth_ndc(rpl);
+        float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
+
+        vec2 sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
+        normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
+        float sample_depth_ndc01 = nd.depth_ndc01;
+        float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
+        float depth_difference_ndc = ray_depth_ndc - sample_depth_ndc;
+
+        if (
+            depth_difference_ndc >= 0.0
+            && (depth_difference_ndc) < min_depth_difference_ndc
+            // && dot(normalize(rpl.cs_xyz1), nd.normal_vs) < 0.0
+        ) {
+            w = mid_w;
+            if (ray_front_depth_ndc <= sample_depth_ndc) {
+                hit_sample_depth_ndc01 = sample_depth_ndc01;
+                hit_sample_uv = sample_uv;
+                hit = 1.0;
+                min_depth_difference_ndc = depth_difference_ndc;
+            } else {
+                w = (w + prev_w) * 0.5;
+            }
+        } else {
+            prev_w = mid_w;
         }
-        
-        state.current_depth_vs = state.current_pos_vs.z;
-        state.sampled_depth_vs = sample_depth_vs(state.current_uv);
-        
-        // Skip if we're at far plane (background)
-        if (state.sampled_depth_vs <= -far_clip_plane * 0.99) {
-            continue;
-        }
-        
-        // Check for intersection using improved method
-        if (steps > 1 && check_intersection(state)) { // Skip check on first iteration
-            // Refine intersection with binary search
-            vec2 refined_uv = binary_search_intersection(
-                state.previous_pos_vs, 
-                state.current_pos_vs,
-                hit_sampled_depth_vs, 
-                depth_difference_vs
-            );
-            
-            if (is_uv_valid(refined_uv)) {
-                return refined_uv;
+    }
+    return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
+}
+
+vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
+    vec3 end_vs = origin_vs + direction_vs * max_distance_vs;
+    if (FRUSTUM_CLIP_ENABLE) {
+        end_vs = segment_end_clip_vs(origin_vs, end_vs);
+    }
+    vec4 origin_cs = position_cs_from_vs(origin_vs);
+    vec4 end_cs = position_cs_from_vs(end_vs);
+
+    raypath rp = raypath_create(origin_cs, end_cs);
+    raypath rp_front = raypath_create(
+        position_cs_from_vs(origin_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_VS)),
+        position_cs_from_vs(end_vs + vec3(0.0, 0.0, THICKNESS_RADIUS_VS))
+    );
+
+    float w = 0.0;
+    float dw = 1.0 / float(STEPS_MAX);
+    float potential_w = 0.0;
+    float min_depth_difference_ndc = INFINITY;
+    float previous_depth_difference_ndc;
+
+    vec2 sample_uv;
+    float sample_depth_ndc01;
+    for (uint i = 0; i < STEPS_MAX; ++i) {
+        w += dw;
+
+        raypath rpl = raypath_lerp(rp, w);
+        raypath rpl_front = raypath_lerp(rp_front, w);
+
+        float ray_depth_ndc = raypath_depth_ndc(rpl);
+        float ray_front_depth_ndc = raypath_depth_ndc(rpl_front);
+
+        sample_uv = position_uv_from_ndc(vec3(rpl.ndc_xy1, ray_depth_ndc)).xy;
+        normal_depth_rough_sample nd = normal_depth_rough_from_sampler(sample_uv);
+        sample_depth_ndc01 = nd.depth_ndc01;
+        float sample_depth_ndc = sample_depth_ndc01 * 2.0 - 1.0;
+        float depth_difference_ndc = ray_depth_ndc - sample_depth_ndc;
+
+        if (depth_difference_ndc >= 0.0) {
+            if (
+                ray_front_depth_ndc <= sample_depth_ndc
+                && dot(direction_vs, nd.normal_vs) < 0.0
+            ) {
+                vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 1.0);
+                if (BSEARCH_ENABLE) {
+                    vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, w, w - dw);
+                    return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
+                } else {
+                    return hit_uv;
+                }
+            } else if (
+                previous_depth_difference_ndc < 0.0
+                && depth_difference_ndc < min_depth_difference_ndc
+            ) {
+                min_depth_difference_ndc = depth_difference_ndc;
+                potential_w = w;
             }
         }
-        
-        // Adaptive step size based on depth gradient
-        // In negative depth space, larger absolute differences mean steeper gradients
-        float depth_gradient = abs(state.sampled_depth_vs - state.previous_depth_vs);
-        if (depth_gradient > DEPTH_THRESHOLD_VS * 10.0) {
-            step_vs *= 0.5; // Smaller steps near surfaces with steep depth changes
-        } else if (depth_gradient < DEPTH_THRESHOLD_VS) {
-            step_vs *= 1.2; // Larger steps in areas with gradual depth changes
-        }
-        
-        // Clamp step size
-        float step_length = length(step_vs);
-        if (step_length < MIN_STEP_SIZE) {
-            step_vs = normalize(step_vs) * MIN_STEP_SIZE;
-        } else if (step_length > STEP_SIZE_VS * 2.0) {
-            step_vs = normalize(step_vs) * STEP_SIZE_VS * 2.0;
-        }
+        previous_depth_difference_ndc = depth_difference_ndc;
     }
-    
-    // No intersection found
-    hit_sampled_depth_vs = -far_clip_plane;
-    depth_difference_vs = 0.0;
-    return state.current_uv;
+
+    vec4 hit_uv = vec4(sample_uv, sample_depth_ndc01, 0.0);
+    if (BSEARCH_ENABLE && potential_w > 0.0) {
+        vec4 bsearch_hit_uv = intersection_binary_minimization_uv(rp, origin_vs, end_vs, min_depth_difference_ndc, potential_w, potential_w - dw);
+        // vec4 bsearch_hit_uv = intersection_binary_search_uv(rp, rp_front, potential_w, potential_w - dw);
+        return mix(hit_uv, bsearch_hit_uv, bsearch_hit_uv.w);
+    } else {
+        return hit_uv;
+    }
 }
 
-// === Utility functions ===
-vec3 luminance_from_rgb(vec3 color) {
-    return vec3(dot(color, vec3(0.2126, 0.7152, 0.0722)));
+
+vec4 test_coordinates(vec3 uv) {
+    const float BORDER_SIZE = 0.01;
+    vec2 quadrant_uv = (uv.xy - vec2(0.5)) * 2.0;
+    vec2 border_xy = step(abs(quadrant_uv), vec2(BORDER_SIZE));
+    float border = max(border_xy.x, border_xy.y) * 0.5;
+
+    vec3 position_ndc = position_ndc_from_uv(uv);
+    vec3 position_vs = position_vs_from_ndc(position_ndc);
+
+    vec4 position_cs_reprojected = position_cs_from_vs(position_vs);
+    vec3 position_ndc_reprojected = position_ndc_from_cs(position_cs_reprojected);
+    vec3 uv_reprojected = position_uv_from_ndc(position_ndc_reprojected);
+    float depth_reprojected_vs = depth_vs_from_ndc01(uv_reprojected.z);
+    vec3 position_vs_reprojected = position_vs_from_ndc(position_ndc_reprojected);
+
+    float uv_eq = step(dot(uv - uv_reprojected, uv - uv_reprojected), EPSILON);
+    float ndc_eq = step(dot(position_ndc - position_ndc_reprojected, position_ndc - position_ndc_reprojected), EPSILON);
+    float depth_eq = step(abs(depth_reprojected_vs - position_vs.z), EPSILON);
+    float vs_eq = step(dot(position_vs - position_vs_reprojected, position_vs - position_vs_reprojected), EPSILON);
+
+    float top_left =        step(quadrant_uv.x, -BORDER_SIZE)   * step(quadrant_uv.y, -BORDER_SIZE);
+    float top_right =       step(BORDER_SIZE, quadrant_uv.x)    * step(quadrant_uv.y, -BORDER_SIZE);
+    float bottom_left =     step(quadrant_uv.x, -BORDER_SIZE)   * step(BORDER_SIZE, quadrant_uv.y);
+    float bottom_right =    step(BORDER_SIZE, quadrant_uv.x)    * step(BORDER_SIZE, quadrant_uv.y);
+
+    float tests = 0.0; 
+    tests += uv_eq * top_left;
+    tests += ndc_eq * top_right;
+    tests += depth_eq * bottom_left;
+    tests += vs_eq * bottom_right;
+    return vec4(border + tests);
 }
 
-// === Main shader ===
+
+float luminance_from_rgb(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// source: https://www.shadertoy.com/view/XlGcRh
+uvec2 pcg2d(uvec2 v) {
+    v = v * 1664525u + 1013904223u;
+
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+
+    v = v ^ (v>>16u);
+
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+
+    v = v ^ (v>>16u);
+
+    return v;
+}
+// http://www.jcgt.org/published/0009/03/02/
+uvec3 pcg3d(uvec3 v) {
+
+    v = v * 1664525u + 1013904223u;
+
+    v.x += v.y*v.z;
+    v.y += v.z*v.x;
+    v.z += v.x*v.y;
+
+    v ^= v >> 16u;
+
+    v.x += v.y*v.z;
+    v.y += v.z*v.x;
+    v.z += v.x*v.y;
+
+    return v;
+}
+
 void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
-    vec4 ndr = texture(normal_depth_rough_texture, in_uv);
-
-    vec3 normal_vs = normalize(ndr.xyz);
-    float depth_ndc = ndr.w;
-    
-    // Skip background pixels
-    if (depth_ndc > 0.999) {
+    vec3 normal_vs;
+    float depth_ndc01;
+    normal_depth_rough_sample ndr = normal_depth_rough_from_sampler(in_uv);
+    normal_vs = ndr.normal_vs;
+    depth_ndc01 = ndr.depth_ndc01;
+    if (depth_ndc01 > FAR_MAX_NDC) {
         out_fragment_color = scene_color;
         return;
     }
 
-    vec3 position_vs = position_vs_from_depth_ndc(in_uv, depth_ndc);
+    vec3 position_ndc = position_ndc_from_uv(vec3(in_uv, depth_ndc01));
+    vec3 position_vs = position_vs_from_ndc(position_ndc);
     vec3 view_direction_vs = normalize(position_vs);
     vec3 reflection_direction_vs = normalize(reflect(view_direction_vs, normal_vs));
 
-    // Perform improved ray marching
-    float hit_sampled_depth_vs;
-    float depth_difference_vs;
-    uint steps;
-    vec2 hit_uv = raymarch_improved(
-        position_vs, 
-        reflection_direction_vs, 
-        hit_sampled_depth_vs, 
-        depth_difference_vs, 
-        steps
+    float roughness_factor = pow(1.0 - ndr.roughness, ROUGHNESS_POWER);
+
+    // vec2 s = in_uv.xy * float(UINT_MAX);
+    // uvec4 u = uvec4(s, uint(s.x) ^ uint(s.y), uint(s.x) + uint(s.y));
+    // vec3 jitter = (vec3(pcg3d(u.xyz)) / float(UINT_MAX)) * 2.0 - 1.0;
+    // vec3 ray_direction_vs = reflection_direction_vs + normal_vs * jitter * (1.0 - roughness_factor) * 0.1;
+    vec3 ray_direction_vs = reflection_direction_vs;
+
+    vec4 hit_uv = intersection_raymarch_uv(position_vs, ray_direction_vs, DISTANCE_MAX_VS);
+    vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
+
+    float fresnel_factor = pow(1.0 - max(dot(-view_direction_vs, normal_vs), 0.0), FRESNEL_POWER);
+
+    float hit_luminance = luminance_from_rgb(hit_color.rgb);
+    float scene_luminance = luminance_from_rgb(scene_color.rgb);
+    float luminance_factor = pow(hit_luminance / (scene_luminance + 1.0), LUMINANCE_POWER);
+
+    float front_ray_factor = pow(1.0 - max(dot(reflection_direction_vs, vec3(0.0, 0.0, 1.0)), 0.0), FRONT_RAY_DISCARD_POWER);
+    vec4 reflection_color = mix(
+        scene_color,
+        hit_color,
+        front_ray_factor * pow(
+            fresnel_factor
+                * luminance_factor
+                * roughness_factor,
+            1.0 / REFLECTION_POWER_BIAS
+        )
     );
-    
-    // Check if ray marching found a valid intersection
-    // Also check if we hit far plane (background)
-    if (steps >= MAX_STEPS_RAYMARCH || !is_uv_valid(hit_uv) || 
-        abs(depth_difference_vs) > DEPTH_THRESHOLD_VS || hit_sampled_depth_vs <= -far_clip_plane * 0.99) {
-        out_fragment_color = scene_color;
-        return;
+
+    if (hit_uv.w == 0.0) {
+        out_fragment_color = hit_uv.z > FAR_MAX_NDC ? reflection_color : scene_color;
+    } else {
+        out_fragment_color = reflection_color;
     }
-    
-    // Sample the reflected color
-    vec4 hit_color = texture(scene_colour_texture, hit_uv);
-    
-    // Calculate reflection factors
-    vec3 hit_luminance = luminance_from_rgb(hit_color.rgb);
-    vec3 scene_luminance = luminance_from_rgb(scene_color.rgb);
-    float luminance_factor = clamp(
-        dot(hit_luminance, hit_luminance) / (dot(scene_luminance, scene_luminance) + 0.001),
-        0.0,
-        1.0
-    );
-    
-    float depth_confidence = 1.0 - smoothstep(0.0, DEPTH_THRESHOLD_VS, abs(depth_difference_vs));
-    float edge_fade = smoothstep(0.0, 0.1, min(min(hit_uv.x, 1.0 - hit_uv.x), min(hit_uv.y, 1.0 - hit_uv.y)));
-    float reflection_strength = /*luminance_factor*/ * depth_confidence * edge_fade;
-    
-    // Final color blend
-    out_fragment_color = mix(scene_color, hit_color, reflection_strength * 0.5);
-    
-    // Debug visualizations (comment out for final version)
-    // out_fragment_color = vec4(hit_uv, 0.0, 1.0); // Show hit UV coordinates
-    // out_fragment_color = vec4(hit_uv - in_uv, 0.0, 1.0); // Show reflection offset
-    // out_fragment_color = vec4(float(steps) / float(MAX_STEPS_RAYMARCH)); // Show step count
+    // out_fragment_color = vec4(ray_direction_vs, 1.0);
+    // out_fragment_color = hit_uv;
 }

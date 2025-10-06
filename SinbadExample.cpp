@@ -69,7 +69,7 @@ void SinbadExample::setupScene(void) {
     mCamNode = mSM->getRootSceneNode()->createChildSceneNode("nCam");
     mCamNode->attachObject(cam);
 
-    mCamNode->setPosition(0, 0, 1000);
+    mCamNode->setPosition(15, -15, 15);
     mCamNode->lookAt(Ogre::Vector3(0, 0, 0), Ogre::Node::TS_WORLD);
 
     // and tell it to render into the main window
@@ -78,11 +78,6 @@ void SinbadExample::setupScene(void) {
     auto &composer = Ogre::CompositorManager::getSingleton();
     ssr.init(composer, *vp);
     ssr.enable_pipelines(composer, *vp);
-
-    // TODO
-    // Ogre::CompositorManager::getSingleton().addCompositor(vp, "SSR");
-    // Ogre::CompositorManager::getSingleton().setCompositorEnabled(vp, "SSR", true);
-    // mSM->addListener
 
 
     mCamMgr = new OgreBites::CameraMan(mCamNode);
@@ -143,4 +138,32 @@ void SinbadExample::setupScene(void) {
     Ogre::SceneNode *planeNode = mSM->getRootSceneNode()->createChildSceneNode("nPlane");
     planeNode->attachObject(planeEnt);
     planeNode->setPosition(0, -5, 0);
+
+
+    // unit cube to measure, spoiler it is not unit
+    Ogre::Entity *cube = mSM->createEntity("Cube", "cube.mesh");
+    cube->getSubEntity(0)->setMaterialName("Examples/Rockwall");
+    cube->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(0.5, 0.5, 0.5, 1.0);
+    cube->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(0.125f);
+    Ogre::SceneNode *cubeNode = mSM->getRootSceneNode()->createChildSceneNode("nCube");
+    cubeNode->attachObject(cube);
+    cubeNode->setPosition(+5, -4.25 + 0.5 * 4.0, 0);
+    cubeNode->setScale(0.02, 0.02 * 4.0, 0.02);
+
+    // back plane and side plane
+    Ogre::Entity *backplane = mSM->createEntity("BigPlane", "plane");
+    backplane->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(1.0, 1.0, 1.0, 1.0);
+    backplane->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(32.0f);
+
+    Ogre::SceneNode *backplane_node = mSM->getRootSceneNode()->createChildSceneNode("nBigPlane");
+    backplane_node->attachObject(backplane);
+    backplane_node->setPosition(0, 2.5, -7.5);
+    backplane_node->pitch(Ogre::Degree(90));
+
+    Ogre::Entity *sideplane = mSM->createEntity("SidePlane", "plane");
+    Ogre::SceneNode *sideplane_node = mSM->getRootSceneNode()->createChildSceneNode("nSidePlane");
+    sideplane_node->attachObject(sideplane);
+    sideplane_node->setPosition(-7.5, 2.5, 0);
+    sideplane_node->yaw(Ogre::Degree(90));
+    sideplane_node->pitch(Ogre::Degree(90));
 }
