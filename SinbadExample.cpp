@@ -76,7 +76,9 @@ void SinbadExample::setupScene(void) {
     Viewport* vp = getRenderWindow()->addViewport(cam);
     ssr_compositor &ssr = *new ssr_compositor{};
     auto &composer = Ogre::CompositorManager::getSingleton();
-    ssr.init(composer, *vp);
+    auto &material_manager = Ogre::MaterialManager::getSingleton();
+    auto &texture_manager = Ogre::TextureManager::getSingleton();
+    ssr.init(*vp, composer, material_manager, texture_manager);
     ssr.enable_pipelines(composer, *vp);
 
 
@@ -143,8 +145,8 @@ void SinbadExample::setupScene(void) {
     // unit cube to measure, spoiler it is not unit
     Ogre::Entity *cube = mSM->createEntity("Cube", "cube.mesh");
     cube->getSubEntity(0)->setMaterialName("Examples/Rockwall");
-    cube->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(0.5, 0.5, 0.5, 1.0);
-    cube->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(0.125f);
+    cube->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(0.7, 0.5, 0.6, 1.0);
+    cube->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(0.5f);
     Ogre::SceneNode *cubeNode = mSM->getRootSceneNode()->createChildSceneNode("nCube");
     cubeNode->attachObject(cube);
     cubeNode->setPosition(+5, -4.25 + 0.5 * 4.0, 0);
@@ -152,7 +154,7 @@ void SinbadExample::setupScene(void) {
 
     // back plane and side plane
     Ogre::Entity *backplane = mSM->createEntity("BigPlane", "plane");
-    backplane->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(1.0, 1.0, 1.0, 1.0);
+    backplane->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(0.75, 0.8, 0.95, 1.0);
     backplane->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(32.0f);
 
     Ogre::SceneNode *backplane_node = mSM->getRootSceneNode()->createChildSceneNode("nBigPlane");
@@ -170,10 +172,10 @@ void SinbadExample::setupScene(void) {
     // sphere
     Ogre::Entity *sphere = mSM->createEntity("Sphere", "sphere.mesh");
     sphere->getSubEntity(0)->setMaterialName("Examples/Chrome");
-    // sphere->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(1.0, 1.0, 1.0, 1.0);
-    // sphere->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(32.0f);
+    sphere->getSubEntity(0)->getTechnique()->getPass(0)->setSpecular(1.0, 1.0, 1.0, 1.0);
+    sphere->getSubEntity(0)->getTechnique()->getPass(0)->setShininess(32.0f);
     Ogre::SceneNode *sphereNode = mSM->getRootSceneNode()->createChildSceneNode("nSphere");
     sphereNode->attachObject(sphere);
-    sphereNode->setPosition(-5, -5, 5);
+    sphereNode->setPosition(-5, -5, 2.5);
     sphereNode->setScale(0.02, 0.02, 0.02);
 }

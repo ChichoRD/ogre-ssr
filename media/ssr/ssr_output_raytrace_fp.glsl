@@ -4,6 +4,8 @@ uniform sampler2D scene_colour_texture;
 uniform sampler2D normal_depth_rough_texture;
 uniform mat4 raytrace_i_projection_matrix;
 uniform mat4 raytrace_projection_matrix;
+uniform mat4 raytrace_i_view_matrix;
+
 
 uniform float near_clip_plane;
 uniform float far_clip_plane;
@@ -19,12 +21,13 @@ const float FAR_MAX_NDC = 1.0 - EPSILON;
 
 const float DISTANCE_MAX_VS = 16.0;
 const float THICKNESS_RADIUS_VS = 0.5;
+const float JITTER_SCALE = 0.1;
 
 const float ROUGHNESS_POWER             =  1.2;
 const float FRESNEL_POWER               =  1.2;
-const float LUMINANCE_POWER             =  1.2;
+const float LUMINANCE_POWER             =  2.2;
 const float FRONT_RAY_DISCARD_POWER     =  16.0;
-const float REFLECTION_POWER_BIAS       =  8.0;
+const float REFLECTION_POWER_BIAS       =  2.0;
 
 const uint STEPS_MAX = 64;
 const uint STEPS_BSEARCH_MAX = 8;
@@ -67,6 +70,10 @@ vec3 position_ndc_from_uv(vec3 uv) {
 vec3 position_vs_from_ndc(vec3 position_ndc) {
     vec4 pos_vs = raytrace_i_projection_matrix * vec4(position_ndc, 1.0);
     return pos_vs.xyz / pos_vs.w;
+}
+vec3 position_ws_from_vs(vec3 position_vs) {
+    vec4 pos_ws = raytrace_i_view_matrix * vec4(position_vs, 1.0);
+    return pos_ws.xyz;
 }
 
 // source: https://stackoverflow.com/a/46118945
@@ -189,7 +196,7 @@ vec4 intersection_binary_minimization_uv(
     return vec4(hit_sample_uv, hit_sample_depth_ndc01, hit);
 }
 
-vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs, out uint steps) {
+vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_distance_vs) {
     vec3 end_vs = origin_vs + direction_vs * max_distance_vs;
     if (FRUSTUM_CLIP_ENABLE) {
         end_vs = segment_end_clip_vs(origin_vs, end_vs);
@@ -207,7 +214,6 @@ vec4 intersection_raymarch_uv(vec3 origin_vs, vec3 direction_vs, float max_dista
     vec2 sample_uv;
     float sample_depth_ndc01;
     for (uint i = 0; i < STEPS_MAX; ++i) {
-        steps = i;
         w += dw;
 
         vec4 position_cs = mix(origin_cs, end_cs, w);
@@ -323,6 +329,12 @@ uvec3 pcg3d(uvec3 v) {
 
     return v;
 }
+// source: https://www.shadertoy.com/view/4djSRW
+vec3 hash33(vec3 p3){
+    p3 = fract(p3 * vec3(.1031, .1030, .0973));
+    p3 += dot(p3, p3.yxz+33.33);
+    return fract((p3.xxy + p3.yxx)*p3.zyx);
+}
 
 void main() {
     vec4 scene_color = texture(scene_colour_texture, in_uv);
@@ -343,14 +355,11 @@ void main() {
 
     float roughness_factor = pow(1.0 - ndr.roughness, ROUGHNESS_POWER);
 
-    // vec2 s = in_uv.xy * float(UINT_MAX);
-    // uvec4 u = uvec4(s, uint(s.x) ^ uint(s.y), uint(s.x) + uint(s.y));
-    // vec3 jitter = (vec3(pcg3d(u.xyz)) / float(UINT_MAX)) * 2.0 - 1.0;
-    // vec3 ray_direction_vs = reflection_direction_vs + normal_vs * jitter * (1.0 - roughness_factor) * 0.1;
-    vec3 ray_direction_vs = reflection_direction_vs;
+    vec3 position_ws = position_ws_from_vs(position_vs);
+    vec3 jitter = (vec3(pcg3d(uvec3(hash33(position_ws) * float(UINT_MAX)))) / float(UINT_MAX)) * 2.0 - 1.0;
+    vec3 ray_direction_vs = reflection_direction_vs + normal_vs * jitter * (1.0 - roughness_factor) * JITTER_SCALE;
 
-    uint steps;
-    vec4 hit_uv = intersection_raymarch_uv(position_vs, ray_direction_vs, DISTANCE_MAX_VS, steps);
+    vec4 hit_uv = intersection_raymarch_uv(position_vs, ray_direction_vs, DISTANCE_MAX_VS);
     vec4 hit_color = texture(scene_colour_texture, hit_uv.xy);
 
     float fresnel_factor = pow(1.0 - max(dot(-view_direction_vs, normal_vs), 0.0), FRESNEL_POWER);
@@ -364,7 +373,7 @@ void main() {
         scene_color,
         hit_color,
         front_ray_factor * pow(
-            fresnel_factor * max(luminance_factor, roughness_factor),
+            fresnel_factor * (luminance_factor + roughness_factor) * roughness_factor,
             1.0 / REFLECTION_POWER_BIAS
         )
     );

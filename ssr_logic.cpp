@@ -3,15 +3,18 @@
 #include <OgreTechnique.h>
 #include <OgreCompositorChain.h>
 
+#include <iostream>
+
 const std::string ssr_logic::name = "ssr";
 
 struct ssr_instance : public Ogre::CompositorInstance::Listener {
+    Ogre::Viewport &viewport;
     uint16_t target_width;
     uint16_t target_height;
 
-    float step_size;
-    float vignette_radius;
-    float vignette_feather;
+    static constexpr std::string_view raytrace_material_name = "ssr/output_raytrace";
+
+    ssr_instance(Ogre::Viewport &viewport) : viewport{viewport}, target_width{0}, target_height{0} { }
 
     void notify_viewport_size(uint16_t width, uint16_t height) {
         target_width = width;
@@ -19,36 +22,52 @@ struct ssr_instance : public Ogre::CompositorInstance::Listener {
     }
 
     void notifyMaterialSetup(Ogre::uint32 pass_id, Ogre::MaterialPtr &mat) override {
-        static constexpr uint32_t pass_id_ssr_normal_depth = 0;
-        static constexpr uint32_t pass_id_ssr_raytrace = 1;
-        
-        switch (pass_id) {
-        case pass_id_ssr_normal_depth: {
-
-            break;
-        }
-        case pass_id_ssr_raytrace: {
-            mat->load();
-            Ogre::GpuProgramParametersSharedPtr fparams =
+        (void)pass_id;
+        if (mat->getName().ends_with(raytrace_material_name)) {
+            auto fragment_parameters =
                 mat->getTechnique(0)->getPass(0)->getFragmentProgramParameters();
+            const auto &camera = *viewport.getCamera();
 
-            fparams->setNamedConstant("step_size", step_size);
-            fparams->setNamedConstant("vignette_radius", vignette_radius);
-            fparams->setNamedConstant("vignette_feather", vignette_feather);
-            // fparams->setNamedConstant("i_projection_matrix", Ogre::);
-            break;
-        }
+            fragment_parameters->setNamedConstant(
+                "raytrace_projection_matrix",
+                camera.getProjectionMatrix()
+            );
+            fragment_parameters->setNamedConstant(
+                "raytrace_i_projection_matrix",
+                camera.getProjectionMatrix().inverse()
+            );
+            fragment_parameters->setNamedConstant(
+                "raytrace_i_view_matrix",
+                camera.getViewMatrix().inverse()
+            );
         }
     }
     void notifyMaterialRender(Ogre::uint32 pass_id, Ogre::MaterialPtr &mat) override {
         (void)pass_id;
-        (void)mat;
+        if (mat->getName().ends_with(raytrace_material_name)) {
+            auto fragment_parameters =
+                mat->getTechnique(0)->getPass(0)->getFragmentProgramParameters();
+            const auto &camera = *viewport.getCamera();
+
+            fragment_parameters->setNamedConstant(
+                "raytrace_projection_matrix",
+                camera.getProjectionMatrix()
+            );
+            fragment_parameters->setNamedConstant(
+                "raytrace_i_projection_matrix",
+                camera.getProjectionMatrix().inverse()
+            );
+            fragment_parameters->setNamedConstant(
+                "raytrace_i_view_matrix",
+                camera.getViewMatrix().inverse()
+            );
+        }
     }
 };
 
 Ogre::CompositorInstance::Listener *ssr_logic::createListener(Ogre::CompositorInstance *instance) {
-    ssr_instance* ssr = new ssr_instance;
-    Ogre::Viewport* viewport = instance->getChain()->getViewport();
-    ssr->notify_viewport_size(viewport->getActualWidth(), viewport->getActualHeight());
+    Ogre::Viewport &viewport = *instance->getChain()->getViewport();
+    ssr_instance* ssr = new ssr_instance{viewport};
+    ssr->notify_viewport_size(viewport.getActualWidth(), viewport.getActualHeight());
     return ssr;
 }

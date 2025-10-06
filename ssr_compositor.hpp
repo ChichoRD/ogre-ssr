@@ -4,13 +4,13 @@
 
 struct ssr_compositor : public Ogre::MaterialManager::Listener {
     static constexpr size_t pipelines_count = 1;
-    
-    // ssr_logic ssr{};
+    ssr_logic ssr{};
     
     Ogre::TexturePtr normal_depth_rough{};
     Ogre::TexturePtr scene{};
     Ogre::TexturePtr temp{};
     std::array<Ogre::CompositorPtr, pipelines_count> pipelines{};
+    std::array<Ogre::CompositorInstance *, pipelines_count> pipeline_instances{};
 
     Ogre::Technique *handleSchemeNotFound(
         unsigned short schemeIndex, 
@@ -21,8 +21,8 @@ struct ssr_compositor : public Ogre::MaterialManager::Listener {
     ) override;
 
 
-    void init(Ogre::CompositorManager &composer, Ogre::Viewport &viewport);
-    void deinit(Ogre::CompositorManager &composer, Ogre::TextureManager &texture_manager);
+    void init(Ogre::Viewport &viewport, Ogre::CompositorManager &composer, Ogre::MaterialManager &material_manager, Ogre::TextureManager &texture_manager);
+    void deinit(Ogre::Viewport &viewport, Ogre::CompositorManager &composer, Ogre::MaterialManager &material_manager, Ogre::TextureManager &texture_manager);
 
     void enable_pipelines(Ogre::CompositorManager &composer, Ogre::Viewport &viewport);
     void disable_pipelines(Ogre::CompositorManager &composer, Ogre::Viewport &viewport);

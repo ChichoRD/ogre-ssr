@@ -5,7 +5,7 @@
 #include "ListenerFactoryLogic.h"
 #include <string_view>
 
-// TODO: use it to configure
+// TODO: use it to edit values at runtime
 struct ssr_logic : public ListenerFactoryLogic {
     static const std::string name;
 protected:
