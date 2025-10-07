@@ -26,7 +26,7 @@ const float JITTER_SCALE = 0.1;
 const float ROUGHNESS_POWER             =  1.2;
 const float FRESNEL_POWER               =  1.2;
 const float LUMINANCE_POWER             =  2.2;
-const float FRONT_RAY_DISCARD_POWER     =  16.0;
+const float FRONT_RAY_DISCARD_POWER     =  0.8;
 const float REFLECTION_POWER_BIAS       =  2.0;
 
 const uint STEPS_MAX = 64;

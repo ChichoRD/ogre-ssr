@@ -8,7 +8,7 @@
 const std::string ssr_logic::name = "ssr";
 
 struct ssr_instance : public Ogre::CompositorInstance::Listener {
-    Ogre::Viewport &viewport;
+    std::reference_wrapper<Ogre::Viewport> viewport;
     uint16_t target_width;
     uint16_t target_height;
 
@@ -26,7 +26,7 @@ struct ssr_instance : public Ogre::CompositorInstance::Listener {
         if (mat->getName().ends_with(raytrace_material_name)) {
             auto fragment_parameters =
                 mat->getTechnique(0)->getPass(0)->getFragmentProgramParameters();
-            const auto &camera = *viewport.getCamera();
+            const auto &camera = *viewport.get().getCamera();
 
             fragment_parameters->setNamedConstant(
                 "raytrace_projection_matrix",
@@ -47,7 +47,7 @@ struct ssr_instance : public Ogre::CompositorInstance::Listener {
         if (mat->getName().ends_with(raytrace_material_name)) {
             auto fragment_parameters =
                 mat->getTechnique(0)->getPass(0)->getFragmentProgramParameters();
-            const auto &camera = *viewport.getCamera();
+            const auto &camera = *viewport.get().getCamera();
 
             fragment_parameters->setNamedConstant(
                 "raytrace_projection_matrix",
