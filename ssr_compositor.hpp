@@ -1,3 +1,6 @@
+#ifndef SSR_COMPOSITOR_HPP
+#define SSR_COMPOSITOR_HPP
+
 #include <OgreMaterialManager.h>
 #include <OgreCompositor.h>
 #include "ssr_logic.hpp"
@@ -24,6 +27,8 @@ struct ssr_compositor : public Ogre::MaterialManager::Listener {
     void init(Ogre::Viewport &viewport, Ogre::CompositorManager &composer, Ogre::MaterialManager &material_manager, Ogre::TextureManager &texture_manager);
     void deinit(Ogre::Viewport &viewport, Ogre::CompositorManager &composer, Ogre::MaterialManager &material_manager, Ogre::TextureManager &texture_manager);
 
-    void enable_pipelines(Ogre::CompositorManager &composer, Ogre::Viewport &viewport);
-    void disable_pipelines(Ogre::CompositorManager &composer, Ogre::Viewport &viewport);
+    void enable_pipelines(Ogre::Viewport &viewport, Ogre::CompositorManager &composer);
+    void disable_pipelines(Ogre::Viewport &viewport, Ogre::CompositorManager &composer);
 };
+
+#endif

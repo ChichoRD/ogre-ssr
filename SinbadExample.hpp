@@ -1,6 +1,8 @@
 #ifndef __SINBADEXAMPLE_HPP__
 #define __SINBADEXAMPLE_HPP__
 
+#include "ssr_compositor.hpp"
+
 #include <OgreApplicationContext.h>
 #include <OgreSceneManager.h>
 #include <OgreRTShaderSystem.h>       
@@ -42,6 +44,8 @@ protected:
 
     Ogre::SceneNode* mCamNode = nullptr;
     OgreBites::CameraMan* mCamMgr = nullptr;
+
+    ssr_compositor ssr{};
 };
 
 #endif

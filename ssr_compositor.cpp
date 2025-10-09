@@ -160,8 +160,8 @@ static auto ssr_compositor_create_pipelines(ssr_compositor &self, Ogre::Viewport
 template<size_t N>
 static auto ssr_compositor_register_pipelines(
     std::array<Ogre::CompositorPtr, N> &pipelines,
-    Ogre::CompositorManager &composer,
-    Ogre::Viewport &viewport
+    Ogre::Viewport &viewport,
+    Ogre::CompositorManager &composer
 ) {
     std::array<Ogre::CompositorInstance *, N> instances{};
     for (size_t i = 0; i < N; ++i) {
@@ -171,13 +171,13 @@ static auto ssr_compositor_register_pipelines(
     return instances;
 }
 
-void ssr_compositor::enable_pipelines(Ogre::CompositorManager &composer, Ogre::Viewport &viewport) {
+void ssr_compositor::enable_pipelines(Ogre::Viewport &viewport, Ogre::CompositorManager &composer) {
     for (const auto &pipeline : pipelines) {
         const auto &name = pipeline->getName();
         composer.setCompositorEnabled(&viewport, name, true);
     }
 }
-void ssr_compositor::disable_pipelines(Ogre::CompositorManager &composer, Ogre::Viewport &viewport) {
+void ssr_compositor::disable_pipelines(Ogre::Viewport &viewport, Ogre::CompositorManager &composer) {
     for (const auto &pipeline : pipelines) {
         const auto &name = pipeline->getName();
         composer.setCompositorEnabled(&viewport, name, false);
@@ -239,22 +239,22 @@ void ssr_compositor::init(Ogre::Viewport &viewport, Ogre::CompositorManager &com
     const auto [compositor] = ssr_compositor_create_pipelines(*this, viewport, composer);
     pipelines[0] = compositor;
 
-    const auto [instance] = ssr_compositor_register_pipelines(pipelines, composer, viewport);
+    const auto [instance] = ssr_compositor_register_pipelines(pipelines, viewport, composer);
     pipeline_instances[0] = instance;
     ssr.compositorInstanceCreated(instance);
 
-    disable_pipelines(composer, viewport);
+    disable_pipelines(viewport, composer);
 }
 void ssr_compositor::deinit(Ogre::Viewport &viewport, Ogre::CompositorManager &composer, Ogre::MaterialManager &material_manager, Ogre::TextureManager &texture_manager) {
     material_manager.removeListener(this, scheme_ndr_name);
     composer.unregisterCompositorLogic(ssr.name);
     
+    for (const auto &instance : pipeline_instances) {
+        ssr.compositorInstanceDestroyed(instance);
+    }
     for (const auto &pipeline : pipelines) {
         const auto &name = pipeline->getName();
         composer.removeCompositor(&viewport, name);
-    }
-    for (const auto &instance : pipeline_instances) {
-        ssr.compositorInstanceDestroyed(instance);
     }
 
     texture_manager.remove(normal_depth_rough->getName(), texture_group_name);

@@ -17,6 +17,15 @@ bool SinbadExample::keyPressed(const OgreBites::KeyboardEvent& evt) {
 
 
 void SinbadExample::shutdown() {
+    Ogre::Viewport &viewport = *getRenderWindow()->getViewport(0);
+    Ogre::CompositorManager &composer = Ogre::CompositorManager::getSingleton();
+    ssr.disable_pipelines(viewport, composer);
+    ssr.deinit(
+        viewport,
+        composer,
+        Ogre::MaterialManager::getSingleton(),
+        Ogre::TextureManager::getSingleton()
+    );
 
     mShaderGenerator->removeSceneManager(mSM);
     mSM->removeRenderQueueListener(mOverlaySystem);
@@ -74,12 +83,12 @@ void SinbadExample::setupScene(void) {
 
     // and tell it to render into the main window
     Viewport* vp = getRenderWindow()->addViewport(cam);
-    ssr_compositor &ssr = *new ssr_compositor{};
+    ssr = ssr_compositor{};
     auto &composer = Ogre::CompositorManager::getSingleton();
     auto &material_manager = Ogre::MaterialManager::getSingleton();
     auto &texture_manager = Ogre::TextureManager::getSingleton();
     ssr.init(*vp, composer, material_manager, texture_manager);
-    ssr.enable_pipelines(composer, *vp);
+    ssr.enable_pipelines(*vp, composer);
 
 
     mCamMgr = new OgreBites::CameraMan(mCamNode);

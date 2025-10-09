@@ -1,3 +1,6 @@
+#ifndef SSR_LOGIC_HPP
+#define SSR_LOGIC_HPP
+
 #include <OgrePrerequisites.h>
 #include <OgreCompositorLogic.h>
 #include <OgreCompositorInstance.h>
@@ -11,3 +14,5 @@ struct ssr_logic : public ListenerFactoryLogic {
 protected:
     Ogre::CompositorInstance::Listener* createListener(Ogre::CompositorInstance* instance) override;
 };
+
+#endif
